@@ -1,0 +1,6 @@
+langsmith
+litellm
+huggingface-hub
+groq
+lmstudio
+python-dotenv

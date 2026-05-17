@@ -1,0 +1,15 @@
+[project]
+name = "build-your-own-ai-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "asyncio>=4.0.0",
+    "groq>=1.2.0",
+    "huggingface-hub>=1.15.0",
+    "langsmith>=0.8.5",
+    "litellm>=1.85.0",
+    "lmstudio>=1.5.0",
+    "python-dotenv>=1.2.2",
+]
