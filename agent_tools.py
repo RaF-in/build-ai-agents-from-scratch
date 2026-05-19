@@ -12,9 +12,9 @@ class AgentContext:
 
 class ToolResult(BaseModel):
     error: bool = False
-    result: dict[str, any]
+    result: dict[str, Any]
     name: str
-    def to_tool_message(self, id: int) -> dict[str, any]: 
+    def to_tool_message(self, id: int) -> dict[str, Any]: 
         return {
             "name": self.name, 
             "role": "tool", 
@@ -26,7 +26,7 @@ class AgentTool(ABC, BaseModel):
     @classmethod
     def tool_name(cls) -> str:
         return cls.__name__
-    def tool_result(self, *, error: bool, result: dict[str, Any]) -> ToolResult:
+    def tool_result(self, *, error: bool = False, result: dict[str, Any]) -> ToolResult:
         return ToolResult(name=self.__class__.tool_name(), error=error, result=result)
     @classmethod
     def to_schema(cls):
@@ -51,7 +51,7 @@ class AgentTool(ABC, BaseModel):
         raise NotImplementedError
 
 class ReadTool(AgentTool):
-    
+    '''A Read tool which helps to read contents from a file'''
     path: str
     async def execute(self, context: AgentContext) -> ToolResult:
         if not os.path.exists(self.path) or not os.path.isfile(self.path):
@@ -75,6 +75,7 @@ class ReadTool(AgentTool):
             })
     
 class WriteTool(AgentTool):
+    '''A write tool which writes a file'''
     path: str
     content: str
     async def execute(self, context: AgentContext) -> ToolResult:
@@ -94,6 +95,7 @@ class WriteTool(AgentTool):
 
     
 class EditTool(AgentTool):
+    '''An edit file tool which edits an existing file'''
     oldContent: str
     newContent: str
     path: str
@@ -130,7 +132,7 @@ class EditTool(AgentTool):
             with open(self.path, "w", encoding="utf-8") as f: 
                 f.write(updated)
             return self.tool_result(result={
-                f"Applied {replacements} and Successfully updated file at {self.path}"
+                "content": f"Applied {replacements} replacement(s) and successfully updated file at {self.path}"
             })
         except Exception as e: 
             return self.tool_result(error=True, result = {
@@ -139,6 +141,7 @@ class EditTool(AgentTool):
 
         
 class BashTool(AgentTool):
+    '''Runs Any bash command to working directory provided'''
     command: str
     cwd: str = "."
     timeouts: int = 30

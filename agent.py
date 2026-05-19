@@ -38,13 +38,13 @@ def read_file(path: str):
         return f"Error reading file {e}"
     return content
 
-class AgentRuntime(BaseModel):
+class AgentRuntime:
     """Minimal runtime that exposes registered tools for the model."""
     def __init__(self, context: AgentContext):
         self.context = context
         self.tools = {tool_cls.__name__: tool_cls for tool_cls in TOOLS}
     def get_tools(self) -> list:
-        return [tool.to_schema() for tool in TOOLS.values()]
+        return [tool.to_schema() for tool in TOOLS]
     def register_tool(self, new_tool: Type[AgentTool]):
         self.tools[new_tool.__name__] = new_tool
     async def run_tool(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
@@ -58,7 +58,7 @@ class AgentRuntime(BaseModel):
             return await tool_obj.execute(self.context)
         except Exception as e:
             return ToolResult(error=True, result={
-                f"Error while running tool {tool_name}"
+                "error": f"Error while running tool {tool_name}"
             })
         
 async def main():
@@ -76,6 +76,7 @@ async def main():
             "content": inp
         })
         await askLLM(messages, runtime, "openai/qwen/qwen3.5-9b", api_base="http://127.0.0.1:1234/v1")
+        # await askLLM(messages, runtime, "huggingface/MiniMaxAI/MiniMax-M2.7")
     # tasks = []
     # tasks.append(askLLM([{
     #     "role": "user", 
@@ -97,7 +98,7 @@ async def main():
 
 @traceable
 async def askLLM(messages,  runtime: AgentRuntime, model_name: str, api_base=None): 
-    kwargs = dict(model=model_name,  tools=tools, api_base=api_base, api_key="lm-studio" if api_base else None)
+    kwargs = dict(model=model_name,  tools=runtime.get_tools(), api_base=api_base, api_key="lm-studio" if api_base else None)
     while True:
         response = await acompletion(**kwargs, messages=messages, stream=False)
         message = response.choices[0].message
@@ -126,7 +127,7 @@ async def askLLM(messages,  runtime: AgentRuntime, model_name: str, api_base=Non
                 # fn = TOOLS.get(function_name)
                 # result = fn(**arguments) if fn else f"Error. No function named {function_name}"
                 tool_result: ToolResult = await runtime.run_tool(function_name, arguments)
-                messages.append(tool_result.to_tool_message)
+                messages.append(tool_result.to_tool_message(tool_call.id))
                 
         else:
             break
