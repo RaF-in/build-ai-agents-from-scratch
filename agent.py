@@ -12,12 +12,16 @@
 # Start LM studio 
 # Define main method 
 
+from typing import Any, Type
+
 from langsmith import traceable
 from litellm import acompletion
 import asyncio
 import json
 # import os
 from dotenv import load_dotenv
+from agent_tools import TOOLS, AgentContext, AgentTool, ToolResult
+from pydantic import BaseModel
 
 # os.environ["LANGCHAIN_TRACING_V2"]="true"
 # os.environ["LANGCHAIN_PROJECT"]="own_agent_demo"
@@ -34,33 +38,32 @@ def read_file(path: str):
         return f"Error reading file {e}"
     return content
 
-def get_read_tool_schema():
-    return {
-        "type": "function", 
-        "function": {
-            "name": "read_file", 
-            "description": "A helper method that reads content of a file from file path specified",
-            "parameters": {
-                "type": "object", 
-                "properties": {
-                    "path": {
-                        "type": "string", 
-                        "description": "file path"
-                    }
-                },
-                "required": ["path"]
-            }
-        }
-    }
-
-
-TOOLS = {
-    "read_file": read_file
-}
-tools = [
-    get_read_tool_schema()
-]
+class AgentRuntime(BaseModel):
+    """Minimal runtime that exposes registered tools for the model."""
+    def __init__(self, context: AgentContext):
+        self.context = context
+        self.tools = {tool_cls.__name__: tool_cls for tool_cls in TOOLS}
+    def get_tools(self) -> list:
+        return [tool.to_schema() for tool in TOOLS.values()]
+    def register_tool(self, new_tool: Type[AgentTool]):
+        self.tools[new_tool.__name__] = new_tool
+    async def run_tool(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
+        tool_cls = self.tools.get(tool_name)
+        if not tool_cls:
+            return ToolResult(error=True, result={
+                "error": f"Tool {tool_name} is not available"
+            })
+        try:
+            tool_obj = tool_cls.model_validate(args)
+            return await tool_obj.execute(self.context)
+        except Exception as e:
+            return ToolResult(error=True, result={
+                f"Error while running tool {tool_name}"
+            })
+        
 async def main():
+    context = AgentContext()
+    runtime = AgentRuntime(context=context)
     messages = []
     while True:
         loop = asyncio.get_event_loop()
@@ -72,7 +75,7 @@ async def main():
             "role": "user", 
             "content": inp
         })
-        await askLLM(messages, "openai/qwen/qwen3.5-9b", api_base="http://127.0.0.1:1234/v1")
+        await askLLM(messages, runtime, "openai/qwen/qwen3.5-9b", api_base="http://127.0.0.1:1234/v1")
     # tasks = []
     # tasks.append(askLLM([{
     #     "role": "user", 
@@ -93,7 +96,7 @@ async def main():
 
 
 @traceable
-async def askLLM(messages, model_name: str, api_base=None): 
+async def askLLM(messages,  runtime: AgentRuntime, model_name: str, api_base=None): 
     kwargs = dict(model=model_name,  tools=tools, api_base=api_base, api_key="lm-studio" if api_base else None)
     while True:
         response = await acompletion(**kwargs, messages=messages, stream=False)
@@ -120,14 +123,10 @@ async def askLLM(messages, model_name: str, api_base=None):
             for tool_call in tool_calls:
                 function_name = tool_call.function.name
                 arguments = json.loads(tool_call.function.arguments)
-                fn = TOOLS.get(function_name)
-                result = fn(**arguments) if fn else f"Error. No function named {function_name}"
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "name": function_name, 
-                    "content": result
-                })
+                # fn = TOOLS.get(function_name)
+                # result = fn(**arguments) if fn else f"Error. No function named {function_name}"
+                tool_result: ToolResult = await runtime.run_tool(function_name, arguments)
+                messages.append(tool_result.to_tool_message)
                 
         else:
             break
