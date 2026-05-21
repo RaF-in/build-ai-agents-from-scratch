@@ -20,8 +20,12 @@ import asyncio
 import json
 # import os
 from dotenv import load_dotenv
-from agent_tools import TOOLS, AgentContext, AgentTool, ToolResult
+from agent_tools import  AgentContext, AgentTool, ToolResult
 from pydantic import BaseModel
+import importlib
+from pathlib import Path
+from rich import print
+import agent_tools
 
 # os.environ["LANGCHAIN_TRACING_V2"]="true"
 # os.environ["LANGCHAIN_PROJECT"]="own_agent_demo"
@@ -42,12 +46,28 @@ class AgentRuntime:
     """Minimal runtime that exposes registered tools for the model."""
     def __init__(self, context: AgentContext):
         self.context = context
-        self.tools = {tool_cls.__name__: tool_cls for tool_cls in TOOLS}
+        self.agent_tool_module = agent_tools
+        self.agent_tool_path = Path(agent_tools.__file__).resolve()
+        self.agent_tool_lastModified = self.agent_tool_path.stat().st_mtime
+        self.tools = {tool_cls.__name__: tool_cls for tool_cls in agent_tools.TOOLS}
+    def reload_runtime(self):
+        currentModifiedTime = self.agent_tool_path.stat().st_mtime
+        if currentModifiedTime == self.agent_tool_lastModified:
+            return
+        self.agent_tool_module = importlib.reload(self.agent_tool_module)
+        self.agent_tool_path = Path(self.agent_tool_module.__file__).resolve()
+        self.agent_tool_lastModified = self.agent_tool_path.stat().st_mtime
+        self.tools = {tool_cls.__name__: tool_cls for tool_cls in agent_tools.TOOLS}
+        reloaded_tools = ",".join(tool for tool in self.tools.keys())
+        print(f"[cyan]reloaded tools are {reloaded_tools}[/cyan]")
+        
     def get_tools(self) -> list:
-        return [tool.to_schema() for tool in TOOLS]
+        self.reload_runtime()
+        return [tool.to_schema() for tool in self.tools]
     def register_tool(self, new_tool: Type[AgentTool]):
         self.tools[new_tool.__name__] = new_tool
     async def run_tool(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
+        self.reload_runtime()
         tool_cls = self.tools.get(tool_name)
         if not tool_cls:
             return ToolResult(error=True, result={
