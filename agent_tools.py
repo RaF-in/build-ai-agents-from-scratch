@@ -1,14 +1,26 @@
 
 from typing import Any, Awaitable
-
 from pydantic import BaseModel
 from abc import ABC, abstractmethod
 import os
 import subprocess
 import json
+from telegram import Bot
 
 class AgentContext:
-    pass
+    def __init__(self, *, chat_id: int | None = None, telegram_client: Bot | None = None):
+        self.telegram_client = telegram_client
+        self.chat_id = chat_id
+
+    async def send_message(self, text: str) -> None:
+        if not self.telegram_client or not self.chat_id:
+            return
+        payload = text.strip()
+        if not payload:
+            return
+        await self.telegram_client.send_message(chat_id=self.chat_id, text=payload)
+
+
 
 class ToolResult(BaseModel):
     error: bool = False
@@ -99,7 +111,7 @@ class EditTool(AgentTool):
     oldContent: str
     newContent: str
     path: str
-    replaceAll: bool
+    replaceAll: bool = False
     async def execute(self, context: AgentContext) -> ToolResult:
         if not os.path.exists(self.path) or not os.path.isfile(self.path):
             return self.tool_result(error=True, result={

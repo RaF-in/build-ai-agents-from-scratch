@@ -104,7 +104,7 @@ class AgentRuntime:
         self.reload_runtime()
         tool_cls = self.tools.get(tool_name)
         if not tool_cls:
-            return ToolResult(error=True, result={
+            return ToolResult(name=tool_name, error=True, result={
                 "error": f"Tool {tool_name} is not available"
             })
         try:
@@ -112,7 +112,7 @@ class AgentRuntime:
             tool_result: ToolResult = await tool_obj.execute(self.context)
             return tool_result
         except Exception as e:
-            return ToolResult(error=True, result={
+            return ToolResult(name=tool_name, error=True, result={
                 "error": f"Error while running tool {tool_name}"
             })
 async def print_llm_response( *, message: dict[str, Any], context: AgentContext): 
@@ -194,6 +194,47 @@ async def askLLM(messages,  runtime: AgentRuntime, model_name: str, context: Age
         else:
             break
     print(messages[-1]["content"])
+
+
+
+@traceable
+async def askLLM2(messages,  runtime: AgentRuntime, model_name: str, context: AgentContext, api_base=None): 
+    kwargs = dict(model=model_name, api_base=api_base, api_key="lm-studio" if api_base else None)
+    response = await acompletion(**kwargs, messages=messages, stream=False, tools=runtime.get_tools())
+    message = response.choices[0].message
+    await runtime.emit("on_model_response", message=message, context=context)
+    tool_calls = message.tool_calls
+
+    msg = {"role": message.role, "content": message.content}
+    if tool_calls:
+        msg["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": tc.type,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments
+                }
+            }
+            for tc in (tool_calls or [])
+        ] 
+
+    messages.append(msg)
+
+    if tool_calls:
+        tool_responses = []
+        for tool_call in tool_calls:
+            function_name = tool_call.function.name
+            arguments = json.loads(tool_call.function.arguments)
+            # fn = TOOLS.get(function_name)
+            # result = fn(**arguments) if fn else f"Error. No function named {function_name}"
+            tool_result: ToolResult = await runtime.run_tool(function_name, arguments)
+            await runtime.emit("on_tool_result", tool_result=tool_result, args=arguments, name=function_name, context=context)
+            tool_responses.append(tool_result.to_tool_message(tool_call.id))
+        return tool_responses
+    else:
+        return None
+
 if __name__ == "__main__":
     asyncio.run(main())
 
