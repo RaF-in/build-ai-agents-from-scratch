@@ -26,6 +26,18 @@ import importlib
 from pathlib import Path
 from rich import print
 import agent_tools
+from session import (
+    SessionManager, SessionEvent, CompactionEvent,
+    TextPart, FunctionCallPart, FunctionResponsePart,
+    FunctionCallData, FunctionResponseData, FcMetaData,
+    StoredEvent,
+)
+
+TOOL_CALL_GUARDRAIL_INSTRUCTION = (
+    "You have used a large number of tool calls. "
+    "Stop calling tools and summarise what you have done so far. "
+    "Ask the user for clarification before proceeding."
+)
 
 # os.environ["LANGCHAIN_TRACING_V2"]="true"
 # os.environ["LANGCHAIN_PROJECT"]="own_agent_demo"
@@ -54,14 +66,17 @@ def read_file(path: str):
 
 class AgentRuntime:
     """Minimal runtime that exposes registered tools for the model."""
-    def __init__(self, context: AgentContext):
+    def __init__(self, context: AgentContext, session_manager: SessionManager, model_name: str):
+        self.model_name = model_name
+        self.session_manager = session_manager
+        self.max_tool_calls_per_turn = 10
         self.context = context
         self.agent_tool_module = agent_tools
         self.agent_tool_path = Path(agent_tools.__file__).resolve()
         self.agent_tool_lastModified = self.agent_tool_path.stat().st_mtime
         self.tools = {tool_cls.__name__: tool_cls for tool_cls in self.agent_tool_module.TOOLS}
         self._hooks: dict[HookType, list[HookAnyType]] = {
-            "on_model_response": [], 
+            "on_model_response": [],
             "on_tool_result": []
         }
     
@@ -100,6 +115,87 @@ class AgentRuntime:
         return [tool.to_schema() for tool in self.tools.values()]
     def register_tool(self, new_tool: Type[AgentTool]):
         self.tools[new_tool.__name__] = new_tool
+    async def initialize(self, *, replay_handler=None) -> None:
+        await self.session_manager.initialize()
+        if replay_handler is None:
+            return
+        events = await self.session_manager.load_messages()
+        for event in events:
+            await replay_handler(event=event)
+
+    async def run(self, user_text: str | None) -> bool:
+        """
+        Pass user_text on first call. Pass None when looping after tool calls.
+        Returns True if tools were called (keep looping), False when done.
+        """
+        conversation = await self.session_manager.load_messages()
+
+        if user_text is not None:
+            await self.session_manager.add_message(
+                SessionEvent(role="user", parts=[TextPart(text=user_text)])
+            )
+            conversation = await self.session_manager.load_messages()
+
+        last_user_idx = -1
+        for idx in range(len(conversation) - 1, -1, -1):
+            event = conversation[idx]
+            if isinstance(event, SessionEvent) and event.role == "user":
+                last_user_idx = idx
+                break
+        events_since_user = (
+            len(conversation) if last_user_idx < 0
+            else len(conversation) - last_user_idx - 1
+        )
+        has_tool_budget = events_since_user < self.max_tool_calls_per_turn
+
+        messages = SessionManager.events_to_litellm_messages(conversation)
+        if not has_tool_budget:
+            messages.append({"role": "user", "content": TOOL_CALL_GUARDRAIL_INSTRUCTION})
+
+        tools = self.get_tools() if has_tool_budget else None
+        response = await acompletion(model=self.model_name, messages=messages, tools=tools)
+        msg = response.choices[0].message
+        tool_calls = msg.tool_calls
+
+        if tool_calls:
+            await self.session_manager.add_message(SessionEvent(
+                role="assistant",
+                parts=[
+                    FunctionCallPart(
+                        data=FunctionCallData(
+                            name=tc.function.name,
+                            args=json.loads(tc.function.arguments),
+                        ),
+                        tool_call_id=tc.id,
+                    )
+                    for tc in tool_calls
+                ],
+            ))
+        else:
+            await self.session_manager.add_message(SessionEvent(
+                role="assistant",
+                parts=[TextPart(text=msg.content or "")],
+            ))
+
+        await self.emit("on_model_response", message=msg, context=self.context)
+
+        if not tool_calls:
+            return False
+
+        response_parts = []
+        for tc in tool_calls:
+            args = json.loads(tc.function.arguments)
+            result = await self.run_tool(tc.function.name, args)
+            await self.emit("on_tool_result", tool_result=result, args=args, name=tc.function.name, context=self.context)
+            response_parts.append(FunctionResponsePart(
+                data=FunctionResponseData(name=tc.function.name, response=result.result),
+                tool_call_id=tc.id,
+                fc_metadata=FcMetaData(name=tc.function.name, args=args),
+            ))
+
+        await self.session_manager.add_message(SessionEvent(role="tool", parts=response_parts))
+        return True
+
     async def run_tool(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
         self.reload_runtime()
         tool_cls = self.tools.get(tool_name)
@@ -117,8 +213,27 @@ class AgentRuntime:
             })
 async def print_llm_response( *, message: dict[str, Any], context: AgentContext): 
     print(f"[green] LLM has responded with {json.dumps(message.model_dump())}[/green]")
-async def print_tool_result( *, tool_result: ToolResult, args: dict[str, Any], name: str, context: AgentContext): 
+async def print_tool_result( *, tool_result: ToolResult, args: dict[str, Any], name: str, context: AgentContext):
     print(f"[blue] tool {name} with args {json.dumps(args)} responds with result  {json.dumps(tool_result.model_dump())}[/blue]")
+
+async def render_history_event(*, event: StoredEvent) -> None:
+    if isinstance(event, CompactionEvent):
+        return
+    for part in event.parts:
+        if isinstance(part, TextPart):
+            if event.role == "user":
+                print(f"You: {part.text}")
+            elif event.role == "assistant":
+                print(f"Assistant: {part.text}")
+            continue
+        if isinstance(part, FunctionCallPart):
+            continue
+        call_name = part.fc_metadata.name if part.fc_metadata else part.data.name
+        call_args = part.fc_metadata.args if part.fc_metadata else {}
+        error = "error" in part.data.response
+        status = "[green]✓[/green]" if not error else "[red]✗[/red]"
+        print(f"{status} [bold]{call_name}[/bold] {call_args}")
+
 async def main():
     context = AgentContext()
     runtime = AgentRuntime(context=context)

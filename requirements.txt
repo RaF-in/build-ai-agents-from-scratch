@@ -7,3 +7,4 @@ python-dotenv
 python-telegram-bot
 fastapi
 uvicorn
+aiosqlite
