@@ -43,6 +43,8 @@ TOOL_CALL_GUARDRAIL_INSTRUCTION = (
 
 load_dotenv()
 
+cli_runtime = None
+
 HookType: TypeAlias = Literal["on_model_response", "on_tool_result"]
 
 class ModelResponseHook(Protocol):
@@ -229,8 +231,8 @@ async def render_history_event(*, event: StoredEvent) -> None:
         status = "[green]✓[/green]" if not error else "[red]✗[/red]"
         print(f"{status} [bold]{call_name}[/bold] {call_args}")
 
-async def main():
-    context = AgentContext()
+def _create_cli_runtime(cron_service=None):
+    context = AgentContext(cron_service=cron_service)
     model_name = "huggingface/zai-org/GLM-5.1"
     session_dir = Path.home() / ".ai_assistant" / "sessions" / "cli"
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -238,6 +240,9 @@ async def main():
     runtime = AgentRuntime(context=context, session_manager=sm, model_name=model_name)
     runtime.on("on_model_response", print_llm_response)
     runtime.on("on_tool_result", print_tool_result)
+    return runtime
+
+async def _cli_loop(runtime):
     await runtime.initialize(replay_handler=render_history_event)
     while True:
         loop = asyncio.get_event_loop()
@@ -248,6 +253,16 @@ async def main():
         has_more = await runtime.run(user_text=inp, sys_prompt=sys_prompt)
         while has_more:
             has_more = await runtime.run(user_text=None, sys_prompt=None)
+
+async def start_cli(cron_service):
+    global cli_runtime
+    runtime = _create_cli_runtime(cron_service=cron_service)
+    cli_runtime = runtime
+    await _cli_loop(runtime)
+
+async def main():
+    runtime = _create_cli_runtime()
+    await _cli_loop(runtime)
 
 if __name__ == "__main__":
     asyncio.run(main())

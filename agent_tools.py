@@ -8,9 +8,10 @@ import json
 from telegram import Bot
 
 class AgentContext:
-    def __init__(self, *, chat_id: int | None = None, telegram_client: Bot | None = None):
+    def __init__(self, *, chat_id: int | None = None, telegram_client: Bot | None = None, cron_service: Any = None):
         self.telegram_client = telegram_client
         self.chat_id = chat_id
+        self.cron_service = cron_service
 
     async def send_message(self, text: str) -> None:
         if not self.telegram_client or not self.chat_id:
@@ -185,7 +186,9 @@ class BashTool(AgentTool):
                 "error": f"Error occurred while running command {self.command}"
             })
         
-TOOLS = [ReadTool, WriteTool, BashTool, EditTool]
+from cron_tools import CronAddTool, CronListTool, CronRemoveTool
+
+TOOLS = [ReadTool, WriteTool, BashTool, EditTool, CronAddTool, CronListTool, CronRemoveTool]
 
 
         

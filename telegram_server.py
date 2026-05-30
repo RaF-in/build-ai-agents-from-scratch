@@ -14,8 +14,15 @@ from context.memory import MemoryManager
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_NAME = "huggingface/zai-org/GLM-5.1"
 
+bot = Bot(token=os.environ.get("TELEGRAM_BOT_TOKEN"))
+cron_service = None
+
 _runtimes: dict[int, AgentRuntime] = {}
 _runtime_locks: dict[int, asyncio.Lock] = {}
+
+def setup(cron_svc):
+    global cron_service
+    cron_service = cron_svc
 
 # Telegram webhook update models
 class TelegramChat(BaseModel):
@@ -46,7 +53,7 @@ async def get_runtime(chat_id: int):
             session_dir.mkdir(parents=True, exist_ok=True)
             sm = SessionManager(basedir=session_dir, model_name=MODEL_NAME)
             runtime = AgentRuntime(
-                context=AgentContext(),
+                context=AgentContext(cron_service=cron_service),
                 session_manager=sm,
                 model_name=MODEL_NAME,
             )
@@ -66,17 +73,16 @@ async def webhook(update: TelegramUpdate):
     if not update.message or not update.message.text:
         return {"ok": True}
     chat_id = update.message.chat.id
-    bot = Bot(token=os.environ.get("TELEGRAM_BOT_TOKEN"))
     runtime, sys_prompt = await get_runtime(chat_id)
-    runtime.context = AgentContext(chat_id=chat_id, telegram_client=bot)
+    runtime.context = AgentContext(chat_id=chat_id, telegram_client=bot, cron_service=cron_service)
     has_more = await runtime.run(user_text=update.message.text, sys_prompt=sys_prompt)
     while has_more:
         has_more = await runtime.run(user_text=None, sys_prompt=None)
     return {"ok": True}
 
 if __name__ == "__main__":
+    from cron.cron import CronService
+    cron_service = CronService(queue=asyncio.Queue())
+    setup(cron_service)
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
