@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from telegram import Bot
 from context.context import prepare_system_message
 from context.memory import MemoryManager
+from slash_commands import TelegramOutputHandler, parse_and_execute
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_NAME = "huggingface/zai-org/GLM-5.1"
@@ -75,7 +76,18 @@ async def webhook(update: TelegramUpdate):
     chat_id = update.message.chat.id
     runtime, sys_prompt = await get_runtime(chat_id)
     runtime.context = AgentContext(chat_id=chat_id, telegram_client=bot, cron_service=cron_service)
-    has_more = await runtime.run(user_text=update.message.text, sys_prompt=sys_prompt)
+
+    # Telegram-specific output handler
+    output = TelegramOutputHandler(runtime.context)
+
+    # Parse slash commands
+    text = update.message.text
+    result = await parse_and_execute(text, runtime, output)
+    if result is True:  # Command handled, skip LLM
+        return {"ok": True}
+
+    # Normal LLM flow
+    has_more = await runtime.run(user_text=text, sys_prompt=sys_prompt)
     while has_more:
         has_more = await runtime.run(user_text=None, sys_prompt=None)
     return {"ok": True}

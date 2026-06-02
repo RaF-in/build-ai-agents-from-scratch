@@ -31,6 +31,7 @@ from session import (
     FunctionCallData, FunctionResponseData, FcMetaData,
     StoredEvent,
 )
+from slash_commands import CLIOutputHandler, parse_and_execute
 
 TOOL_CALL_GUARDRAIL_INSTRUCTION = (
     "You have used a large number of tool calls. "
@@ -62,6 +63,7 @@ class AgentRuntime:
         self.max_tool_calls_per_turn = 10
         self.context = context
         self._sys_prompt: str | None = None
+        self.thinking_mode: Literal["off", "on", "stream"] = "off"
         self.agent_tool_module = agent_tools
         self.agent_tool_path = Path(agent_tools.__file__).resolve()
         self.agent_tool_lastModified = self.agent_tool_path.stat().st_mtime
@@ -243,12 +245,25 @@ def _create_cli_runtime(cron_service=None):
     return runtime
 
 async def _cli_loop(runtime):
+    output = CLIOutputHandler()
+
     await runtime.initialize(replay_handler=render_history_event)
     while True:
         loop = asyncio.get_event_loop()
         inp = await loop.run_in_executor(None, input, "You: ")
+
+        # Legacy exit shortcuts
         if inp.lower() in {"exit", "bye"}:
             break
+
+        # Slash commands
+        result = await parse_and_execute(inp, runtime, output)
+        if result == "QUIT":
+            break
+        if result is True:  # Command handled, skip LLM
+            continue
+
+        # Normal LLM flow
         sys_prompt = prepare_system_message(MemoryManager())
         has_more = await runtime.run(user_text=inp, sys_prompt=sys_prompt)
         while has_more:
