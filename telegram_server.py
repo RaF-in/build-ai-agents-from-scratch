@@ -11,6 +11,7 @@ from telegram import Bot
 from context.context import prepare_system_message
 from context.memory import MemoryManager
 from slash_commands import TelegramOutputHandler, parse_and_execute
+from skills import skill_manager
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_NAME = "huggingface/zai-org/GLM-5.1"
@@ -64,7 +65,8 @@ async def get_runtime(chat_id: int):
             runtime.on("on_tool_result", print_tool_result)
             await runtime.initialize(replay_handler=render_history_event)
             _runtimes[chat_id] = runtime
-    sys_prompt = prepare_system_message(MemoryManager())
+    skill_manager.discover()
+    sys_prompt = prepare_system_message(MemoryManager(), skill_manager.format_for_prompt())
     return _runtimes[chat_id], sys_prompt
 
 app = FastAPI()
@@ -86,8 +88,11 @@ async def webhook(update: TelegramUpdate):
     if result is True:  # Command handled, skip LLM
         return {"ok": True}
 
+    # A /skill: invocation expands into a full LLM turn.
+    user_text = result[1] if isinstance(result, tuple) else text
+
     # Normal LLM flow
-    has_more = await runtime.run(user_text=text, sys_prompt=sys_prompt)
+    has_more = await runtime.run(user_text=user_text, sys_prompt=sys_prompt)
     while has_more:
         has_more = await runtime.run(user_text=None, sys_prompt=None)
     return {"ok": True}

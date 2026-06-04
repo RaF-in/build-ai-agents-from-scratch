@@ -27,7 +27,8 @@ async def process_cron_messages(cron_service):
                 if not agent.cli_runtime:
                     continue
                 runtime = agent.cli_runtime
-                sys_prompt = prepare_system_message(MemoryManager())
+                from skills import skill_manager
+                sys_prompt = prepare_system_message(MemoryManager(), skill_manager.format_for_prompt())
 
             else:
                 continue

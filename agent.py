@@ -32,6 +32,7 @@ from session import (
     StoredEvent,
 )
 from slash_commands import CLIOutputHandler, parse_and_execute
+from skills import skill_manager
 
 TOOL_CALL_GUARDRAIL_INSTRUCTION = (
     "You have used a large number of tool calls. "
@@ -247,6 +248,10 @@ def _create_cli_runtime(cron_service=None):
 async def _cli_loop(runtime):
     output = CLIOutputHandler()
 
+    skill_manager.discover()
+    if skill_manager.names():
+        print(f"[magenta]Skills: {', '.join(skill_manager.names())}[/magenta]")
+
     await runtime.initialize(replay_handler=render_history_event)
     while True:
         loop = asyncio.get_event_loop()
@@ -263,9 +268,12 @@ async def _cli_loop(runtime):
         if result is True:  # Command handled, skip LLM
             continue
 
+        # A /skill: invocation expands into a full LLM turn.
+        user_text = result[1] if isinstance(result, tuple) else inp
+
         # Normal LLM flow
-        sys_prompt = prepare_system_message(MemoryManager())
-        has_more = await runtime.run(user_text=inp, sys_prompt=sys_prompt)
+        sys_prompt = prepare_system_message(MemoryManager(), skill_manager.format_for_prompt())
+        has_more = await runtime.run(user_text=user_text, sys_prompt=sys_prompt)
         while has_more:
             has_more = await runtime.run(user_text=None, sys_prompt=None)
 

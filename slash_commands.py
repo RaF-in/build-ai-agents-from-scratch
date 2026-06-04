@@ -190,19 +190,55 @@ class SlashCommandHandler:
 # Facade — single entry point for all interfaces
 # =====================================================================
 
+async def _expand_skill_command(
+    text: str,
+    output: OutputHandler,
+) -> bool | tuple[str, str]:
+    """Expand a `/skill:<name> [args]` invocation into a full LLM turn.
+
+    Returns ("RUN", expanded_text) so the caller feeds it to the LLM, or
+    True when the skill is unknown (error already sent, skip the LLM).
+    """
+    from skills import skill_manager
+
+    skill_manager.discover()  # always read the latest skills from disk
+
+    body = text[len("/skill:"):].strip()
+    name, _, args = body.partition(" ")
+    name = name.strip()
+
+    skill = skill_manager.get(name)
+    if skill is None:
+        available = ", ".join(skill_manager.names()) or "(none)"
+        await output.send(
+            f"❌ Unknown skill: {name!r}. Available skills: {available}"
+        )
+        return True
+
+    expanded = (
+        f"You are now executing the '{skill.name}' skill. "
+        f"Follow these instructions exactly:\n\n"
+        f"{skill.instructions}"
+    )
+    if args.strip():
+        expanded += f"\n\n## User request\n{args.strip()}"
+    return ("RUN", expanded)
+
+
 async def parse_and_execute(
     text: str,
     runtime: "AgentRuntime",
     output: OutputHandler,
-) -> bool | str:
+) -> bool | str | tuple[str, str]:
     """
     Parse and execute a slash command.
 
     Returns
     -------
-    True   — command was handled, skip the LLM call
-    "QUIT" — caller should break out of its main loop
-    False  — not a slash command, continue to normal LLM flow
+    True             — command was handled, skip the LLM call
+    "QUIT"           — caller should break out of its main loop
+    ("RUN", text)    — run the given text through the LLM as a normal turn
+    False            — not a slash command, continue to normal LLM flow
     """
     if not text.startswith("/"):
         return False
@@ -210,6 +246,9 @@ async def parse_and_execute(
     handler = SlashCommandHandler(runtime, output)
     parts = text.strip().split()
     command = parts[0].lower()
+
+    if command.startswith("/skill:"):
+        return await _expand_skill_command(text.strip(), output)
 
     if command == "/new":
         return await handler.handle_new()
