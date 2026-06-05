@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Any, Optional
 from pathlib import Path
-from agent_tools import AgentContext, ToolResult
+from tool_base import AgentContext, ToolResult
 from agent import AgentRuntime, render_history_event, print_llm_response, print_tool_result
 from session import SessionManager
 import os

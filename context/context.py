@@ -19,8 +19,10 @@ def prepare_system_message(memory: MemoryManager, skills_prompt: str = ""):
         sections.append(
             "## Skills\n"
             "You have access to the following skills. Each skill is a reusable, "
-            "step-by-step procedure. To run one, the user (or you) invokes it with "
-            "`/skill:<name>` and its full instructions are injected for you to follow.\n"
+            "step-by-step procedure.\n\n"
+            "**Ways to invoke a skill:**\n"
+            "1. User types `/skill:<name>` - skill instructions are injected immediately\n"
+            "2. You call `SkillInvokeTool(name=\"skill-name\")` - skill instructions are loaded for you to follow\n\n"
             f"{skills_prompt}"
         )
 

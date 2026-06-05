@@ -2,7 +2,7 @@ import asyncio
 from cron.cron import CronService
 from telegram_server import setup as setup_telegram, get_runtime, bot, app
 import agent
-from agent_tools import AgentContext
+from tool_base import AgentContext
 from context.context import prepare_system_message
 from context.memory import MemoryManager
 import uvicorn
