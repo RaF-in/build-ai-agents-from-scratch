@@ -130,8 +130,9 @@ class BashTool(AgentTool):
         
 from cron_tools import CronAddTool, CronListTool, CronRemoveTool
 from skills_tools import SkillCreateTool, SkillListTool, SkillDeleteTool, SkillInvokeTool
+from subagent_tools import SpawnSubagentTool
 
-TOOLS = [ReadTool, WriteTool, BashTool, EditTool, CronAddTool, CronListTool, CronRemoveTool, SkillCreateTool, SkillListTool, SkillDeleteTool, SkillInvokeTool]
+TOOLS = [ReadTool, WriteTool, BashTool, EditTool, CronAddTool, CronListTool, CronRemoveTool, SkillCreateTool, SkillListTool, SkillDeleteTool, SkillInvokeTool, SpawnSubagentTool]
 
 
         

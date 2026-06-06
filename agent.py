@@ -58,7 +58,7 @@ HookAnyType: TypeAlias = ModelResponseHook | ToolResultHook
 
 class AgentRuntime:
     """Minimal runtime that exposes registered tools for the model."""
-    def __init__(self, context: AgentContext, session_manager: SessionManager, model_name: str):
+    def __init__(self, context: AgentContext, session_manager: SessionManager, model_name: str, tools_override: list[Type[AgentTool]] | None = None):
         self.model_name = model_name
         self.session_manager = session_manager
         self.max_tool_calls_per_turn = 10
@@ -68,7 +68,13 @@ class AgentRuntime:
         self.agent_tool_module = agent_tools
         self.agent_tool_path = Path(agent_tools.__file__).resolve()
         self.agent_tool_lastModified = self.agent_tool_path.stat().st_mtime
-        self.tools = {tool_cls.__name__: tool_cls for tool_cls in self.agent_tool_module.TOOLS}
+        if tools_override is not None:
+            # Child runtime: fixed tool set, hot-reload disabled (structural depth limit).
+            self.tools = {tool_cls.__name__: tool_cls for tool_cls in tools_override}
+            self._tools_locked = True
+        else:
+            self.tools = {tool_cls.__name__: tool_cls for tool_cls in self.agent_tool_module.TOOLS}
+            self._tools_locked = False
         self._hooks: dict[HookType, list[HookAnyType]] = {
             "on_model_response": [],
             "on_tool_result": []
@@ -89,6 +95,8 @@ class AgentRuntime:
                 print(f"[Hook Error] Event '{event}' failed: {e}")
 
     def reload_runtime(self):
+        if self._tools_locked:
+            return  # children never reload — they can't gain new tools
         currentModifiedTime = self.agent_tool_path.stat().st_mtime
         if currentModifiedTime == self.agent_tool_lastModified:
             return

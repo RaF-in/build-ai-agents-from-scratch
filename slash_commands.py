@@ -155,6 +155,33 @@ class SlashCommandHandler:
         await self.output.send_rich(status, format_type="status")
         return True
 
+    # ---- /agents -----------------------------------------------------
+
+    async def handle_agents(self) -> bool:
+        """Display subagent run history and active runs."""
+        from subagent import subagent_registry
+        active = list(subagent_registry.active.values())
+        history = subagent_registry.history[-10:]
+
+        lines = [f"Subagents — {len(active)}/{subagent_registry.max_concurrent} active"]
+        if active:
+            lines.append("\nRunning:")
+            for r in active:
+                lines.append(f"  [{r.id}] {r.duration:.0f}s  {r.task[:60]}")
+        if history:
+            lines.append("\nRecent:")
+            icon = {"completed": "✓", "failed": "✗", "expired": "⏱", "rejected": "⊘"}
+            for r in reversed(history):
+                mark = icon.get(r.status, "?")
+                suffix = f" (attempt {r.attempts})" if r.attempts > 1 else ""
+                lines.append(f"  {mark} [{r.id}] {r.duration:.0f}s  {r.task[:50]}{suffix}")
+                if r.result_preview:
+                    lines.append(f"      → {r.result_preview}")
+        if not active and not history:
+            lines.append("\nNo subagents spawned yet.")
+        await self.output.send_rich("\n".join(lines), format_type="status")
+        return True
+
     # ---- /quit -------------------------------------------------------
 
     async def handle_quit(self) -> str:
@@ -262,6 +289,9 @@ async def parse_and_execute(
 
     elif command == "/status":
         return await handler.handle_status()
+
+    elif command == "/agents":
+        return await handler.handle_agents()
 
     elif command == "/quit":
         return await handler.handle_quit()
