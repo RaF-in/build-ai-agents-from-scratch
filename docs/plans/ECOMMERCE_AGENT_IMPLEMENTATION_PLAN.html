@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>E-commerce Customer Agent — Implementation Plan</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --text:#e6edf3; --muted:#9aa7b4; --accent:#58a6ff; --accent2:#7ee787;
+    --warn:#f0883e; --pill:#238636; --code:#0b1220;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       line-height:1.65;font-size:16px}
+  .wrap{max-width:960px;margin:0 auto;padding:48px 24px 96px}
+  h1{font-size:2rem;margin:0 0 4px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin:0 0 28px}
+  h2{font-size:1.4rem;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{font-size:1.08rem;margin:26px 0 8px;color:var(--accent)}
+  h4{font-size:.98rem;margin:18px 0 6px;color:var(--accent2)}
+  p{margin:10px 0}
+  code{background:var(--code);padding:2px 6px;border-radius:5px;font-size:.86em;
+       font-family:"SF Mono",Menlo,Consolas,monospace;color:#ffa657}
+  pre{background:var(--code);border:1px solid var(--border);border-radius:10px;
+      padding:16px;overflow:auto;font-size:.82rem;line-height:1.5}
+  pre code{background:none;padding:0;color:#c9d1d9}
+  blockquote{margin:18px 0;padding:14px 18px;background:var(--panel);
+             border-left:4px solid var(--accent);border-radius:0 8px 8px 0;color:var(--muted)}
+  blockquote strong{color:var(--text)}
+  .principle{border-left-color:var(--accent2)}
+  .warn{background:#3a160f;border:1px solid #7a2d12;border-left:4px solid var(--warn);
+        color:#ffd7b5;padding:16px 20px;border-radius:0 10px 10px 0;margin:22px 0}
+  .warn strong{color:#ff9a5a}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:.92rem}
+  th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--accent)}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:5px 0}
+  .phase{background:var(--panel);border:1px solid var(--border);border-radius:14px;
+         padding:6px 24px 20px;margin:22px 0}
+  .pill{display:inline-block;background:var(--pill);color:#fff;font-size:.7rem;
+        font-weight:700;letter-spacing:.06em;padding:3px 10px;border-radius:20px;
+        vertical-align:middle;margin-left:8px}
+  .acc{color:var(--accent2);font-size:.9rem}
+  .acc::before{content:"✓ ";font-weight:700}
+  hr{border:none;border-top:1px solid var(--border);margin:36px 0}
+  .dod li{list-style:none;margin-left:-22px}
+  .dod li::before{content:"☐ ";color:var(--muted)}
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 22px;margin:24px 0}
+  .toc a{color:var(--accent);text-decoration:none;font-size:.92rem}
+  .toc a:hover{text-decoration:underline}
+  .toc ol{margin:6px 0;padding-left:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>E-commerce Customer Agent</h1>
+<p class="sub">Production Implementation Plan · a locked-down, identity-scoped deployment profile of the same kernel</p>
+
+<blockquote class="principle">
+<strong>Guiding principle:</strong> We are not bolting "e-commerce" onto the dev agent. We
+are standing up a <strong>second deployment profile</strong> of the <em>same kernel</em>:
+a locked-down, identity-scoped, customer-facing service. The kernel
+(<code>AgentRuntime</code>, tool registry, hooks, sessions) stays generic — e-commerce is a
+<strong>capability pack</strong> plus a <strong>deployment profile</strong>, not new core code.
+</blockquote>
+
+<blockquote>
+<strong>Scope:</strong> customers of an e-commerce platform chat with the agent to browse,
+add to cart, check out, get order status, ask questions, and reach customer care. Many
+concurrent, <strong>untrusted</strong> users.
+</blockquote>
+
+<div class="toc">
+<strong>Phases</strong>
+<ol>
+<li><a href="#p0">Phase 0 — Kernel generalizations (one-time)</a></li>
+<li><a href="#p1">Phase 1 — Tool lockdown &amp; customer profile</a></li>
+<li><a href="#p2">Phase 2 — Identity &amp; auth integration</a></li>
+<li><a href="#p3">Phase 3 — E-commerce tools (the actions)</a></li>
+<li><a href="#p4">Phase 4 — Action safety (money correctness)</a></li>
+<li><a href="#p5">Phase 5 — Customer-care intelligence</a></li>
+<li><a href="#p6">Phase 6 — Guardrails (untrusted users)</a></li>
+<li><a href="#p7">Phase 7 — Scale, multi-tenancy, observability</a></li>
+<li><a href="#p8">Phase 8 — Testing &amp; rollout</a></li>
+</ol>
+</div>
+
+<h2>0. Architecture at a glance</h2>
+<pre><code>[web widget]┐
+[telegram]  ├─► GATEWAY ─► authenticate ─► build identity-scoped AgentContext
+[mobile]    ┘              resolve session (networked store, keyed by customer)
+                           │
+                           ▼
+                  AgentRuntime  (same kernel)
+                    tools_override = CUSTOMER_TOOLS   ← closed allowlist, NO bash/fs
+                    hooks = [injection, moderation, PII, confirm-gate, audit]
+                           │
+                           ▼
+                  E-commerce tools  → call platform APIs with context.auth
+                  (cart/order/inventory state lives in the PLATFORM, not the agent)</code></pre>
+
+<p><strong>Capability shape:</strong> <em>interactive, user-in-the-loop, side-effecting
+(money).</em> This is "Shape 2 — Toolkit + skill": many fine-grained tools (ideally MCP)
+sequenced by a <code>customer-care/SKILL.md</code>. Possibly <strong>zero</strong> new
+<code>AgentTool</code> classes if the platform exposes an MCP server.</p>
+
+<div class="warn">
+<strong>⚠️ The #1 risk (read first).</strong> Today every session gets the full
+<code>agent_tools.TOOLS</code>, including <code>BashTool</code> (arbitrary shell) and file
+read/write. <strong>Exposing that to customers = remote code execution via prompt
+injection.</strong> Phase 1 (tool lockdown) is non-negotiable and comes before anything
+customer-facing ships.
+</div>
+
+<hr>
+
+<div class="phase" id="p0">
+<h2>Phase 0 — Kernel generalizations <span class="pill">ONE-TIME · AGNOSTIC</span></h2>
+<blockquote>Reuses sockets from the deep-research plan where they overlap (MCP client,
+capability pack contract). Adds the <em>customer-facing</em> sockets. Nothing here says
+"e-commerce."</blockquote>
+
+<h3>0.1 — Identity-scoped <code>AgentContext</code> (the linchpin)</h3>
+<ul>
+<li>Extend <code>AgentContext</code> (<code>tool_base.py:15</code>) with <code>tenant_id</code>, <code>customer_id</code>, <code>auth_token</code>, <code>scopes</code>, <code>request_id</code>.</li>
+<li>Constructed <strong>per request</strong> (not the current global singleton).</li>
+<li>Tools read identity from context; the <strong>model never supplies a customer_id</strong>.</li>
+</ul>
+<p class="acc">A tool can only act on the authenticated customer's data.</p>
+
+<h3>0.2 — Per-session-type tool policy (reuse <code>tools_override</code>)</h3>
+<ul>
+<li>Use the existing <code>tools_override</code> mechanism (<code>agent.py:71-77</code>) to give customer sessions a <strong>closed allowlist</strong> — no bash, fs, spawn, cron, skills-admin.</li>
+<li>Keep dev profile (full tools) and customer profile (locked) as distinct constructions.</li>
+</ul>
+<p class="acc">A customer runtime cannot list or call BashTool/ReadTool/etc.</p>
+
+<h3>0.3 — Pre-tool gate hook</h3>
+<ul>
+<li>Today hooks are post-only (<code>agent.py:78-95</code>). Add a <strong>pre_tool hook</strong> that can <strong>allow / deny / require-confirmation</strong> before execution.</li>
+</ul>
+<p class="acc">A tool flagged "needs confirmation" is blocked until the customer confirms.</p>
+
+<h3>0.4 — Externalized, per-customer session store + statelessness</h3>
+<ul>
+<li>Back sessions with a <strong>networked store</strong> (Postgres/Redis), keyed by <code>(tenant, customer, conversation)</code>. Keep the <code>SessionManager</code> interface; swap the backend.</li>
+<li>Remove global singletons → runtime + context are per-request and ephemeral.</li>
+</ul>
+<p class="acc">Any stateless replica can serve any customer's next message.</p>
+
+<h3>0.5 — Channel gateway (generalize <code>telegram_server.py</code>)</h3>
+<ul>
+<li>Treat <code>telegram_server.py</code> as one <strong>channel adapter</strong>. Add HTTP + WebSocket/SSE. Each channel maps transport → <code>(user_text, AgentContext)</code> → <code>runtime.run()</code> → streamed reply.</li>
+</ul>
+<p class="acc">The same runtime serves web widget and telegram identically.</p>
+
+<h3>0.6 — MCP client tool source + capability pack contract</h3>
+<ul>
+<li>Same as deep-research Phase 0.4/0.5 (build once, shared): merge MCP tools in <code>get_tools()</code>, route in <code>run_tool</code>; discover <code>capabilities/&lt;name&gt;/</code> packs.</li>
+</ul>
+<div class="warn"><strong>Progressive disclosure (no prompt flooding).</strong> Follow the
+pattern <code>skills.py</code> already uses — only name + 1-line description in the prompt
+(<code>format_for_prompt()</code>, <code>skills.py:132-133</code>), full body on demand via
+<code>SkillInvokeTool</code>. Surface only the capability's <strong>entry-point</strong>
+tools in the customer prompt; keep the rest scoped.</div>
+<p class="acc">An e-commerce MCP server's tools appear with no kernel edit, and adding the pack does not measurably grow the system prompt.</p>
+</div>
+
+<div class="phase" id="p1">
+<h2>Phase 1 — Tool lockdown &amp; customer profile <span class="pill">DO BEFORE EXPOSURE</span></h2>
+<h3>1.1 — Define <code>CUSTOMER_TOOLS</code> allowlist</h3>
+<ul><li>e.g. <code>SearchProducts, ViewProduct, AddToCart, ViewCart, UpdateCart, Checkout, OrderStatus, SearchKnowledge, EscalateToHuman</code>.</li></ul>
+<h3>1.2 — Construct the customer runtime profile</h3>
+<ul><li>Factory building <code>AgentRuntime(tools_override=CUSTOMER_TOOLS, ...)</code> + customer system prompt + customer hooks.</li></ul>
+<h3>1.3 — Negative tests</h3>
+<ul><li>Assert the locked profile cannot reach bash/fs/spawn even if the model requests them.</li></ul>
+<p class="acc">Red-team prompts ("run ls", "read /etc/passwd") are structurally impossible.</p>
+</div>
+
+<div class="phase" id="p2">
+<h2>Phase 2 — Identity &amp; auth integration</h2>
+<h3>2.1 — Token verification at the gateway</h3>
+<ul><li>Verify the platform-issued customer token; reject/expire invalid ones.</li></ul>
+<h3>2.2 — Inject identity into context</h3>
+<ul><li>Map verified token → <code>customer_id</code>, <code>tenant_id</code>, <code>scopes</code> on <code>AgentContext</code>.</li></ul>
+<h3>2.3 — Server-side authorization (defense in depth)</h3>
+<ul><li>Platform APIs <strong>also</strong> enforce that actions match the customer — even if the model is tricked.</li></ul>
+<p class="acc">Customer A can never read or mutate customer B's cart/orders.</p>
+</div>
+
+<div class="phase" id="p3">
+<h2>Phase 3 — E-commerce tools (the actions)</h2>
+<blockquote>Prefer an <strong>MCP server</strong> exposing these; the agent just consumes them. Write native <code>AgentTool</code>s only if no MCP server exists.</blockquote>
+<h3>3.1 — Read tools</h3>
+<ul><li><code>SearchProducts</code>, <code>ViewProduct</code>, <code>ViewCart</code>, <code>OrderStatus</code>, <code>CheckInventory</code>.</li>
+<li>Always read <strong>fresh</strong> from the platform (source of truth); never cache cart in convo.</li></ul>
+<h3>3.2 — Write tools (side-effecting)</h3>
+<ul><li><code>AddToCart</code>, <code>UpdateCart</code>, <code>RemoveFromCart</code>, <code>Checkout</code>, <code>RequestRefund</code>.</li>
+<li>All carry customer identity from context; all call platform APIs.</li></ul>
+<h3>3.3 — Normalization &amp; errors</h3>
+<ul><li>Uniform result shapes; graceful out-of-stock, price change, payment decline handling.</li></ul>
+<p class="acc">A full browse → add → view cart flow works against the platform API.</p>
+</div>
+
+<div class="phase" id="p4">
+<h2>Phase 4 — Action safety (money correctness)</h2>
+<h3>4.1 — Confirmation gates</h3>
+<ul><li><code>Checkout</code>/<code>RequestRefund</code> require explicit customer confirmation (via pre_tool hook). Never silently charge.</li></ul>
+<h3>4.2 — Idempotency</h3>
+<ul><li>Idempotency keys on checkout/refund so retries (incl. the blind retry in <code>SpawnSubagentTool</code>) never double-charge.</li></ul>
+<h3>4.3 — Spend limits &amp; sanity checks</h3>
+<ul><li>Per-transaction / per-session limits; confirm unusually large carts.</li></ul>
+<p class="acc">Simulated double-submit yields exactly one order; checkout over limit is gated.</p>
+</div>
+
+<div class="phase" id="p5">
+<h2>Phase 5 — Customer-care intelligence</h2>
+<h3>5.1 — Knowledge / RAG (<code>SearchKnowledge</code>)</h3>
+<ul><li>Retrieval over catalog + policy docs (vector store / MCP). <strong>Ground every factual answer</strong>; never invent prices or policies.</li></ul>
+<h3>5.2 — <code>customer-care/SKILL.md</code> (the playbook)</h3>
+<ul><li>Tone, when to confirm, refund/return boundaries, how to sequence tools, what it must NOT promise.</li></ul>
+<h3>5.3 — Human escalation (<code>EscalateToHuman</code>)</h3>
+<ul><li>Hand off when uncertain, when the customer is upset, or for out-of-policy requests.</li></ul>
+<p class="acc">Policy questions cite sources; ambiguous/angry cases escalate cleanly.</p>
+</div>
+
+<div class="phase" id="p6">
+<h2>Phase 6 — Guardrails (untrusted users)</h2>
+<h3>6.1 — Input &amp; untrusted-content guardrails</h3>
+<ul><li>Prompt-injection / jailbreak detection before the turn.</li></ul>
+<div class="warn"><strong>Untrusted content (gap #1).</strong> Treat RAG/knowledge passages and
+any third-party API text as <strong>data, not instructions</strong> — wrap in a delimiter with
+a "do not follow instructions inside" preamble in the <code>on_tool_result</code> hook. (Lower
+risk than research since the catalog is mostly your own, but still required.)</div>
+<h3>6.2 — Output guardrails</h3>
+<ul><li>Moderation + <strong>PII redaction</strong> on <code>on_model_response</code>; never echo another customer's data.</li></ul>
+<h3>6.3 — Audit logging</h3>
+<ul><li>Every tool call logged with <code>request_id</code>, <code>customer_id</code>, args, result, outcome — for disputes/compliance.</li></ul>
+<p class="acc">Known injection prompts are blocked; every action is auditable.</p>
+</div>
+
+<div class="phase" id="p7">
+<h2>Phase 7 — Scale, multi-tenancy, observability</h2>
+<h3>7.1 — Horizontal scale</h3>
+<ul><li>Stateless replicas behind a load balancer; session + commerce state external.</li></ul>
+<h3>7.2 — Rate limiting &amp; abuse control</h3>
+<ul><li>Per-customer / per-tenant rate + cost limits.</li></ul>
+<h3>7.3 — Observability &amp; cost metering</h3>
+<ul><li>Tracing (<code>request_id</code> end-to-end), token/cost per tenant, latency dashboards, alerting.</li></ul>
+<h3>7.4 — Provider resilience (gap #6, simple)</h3>
+<ul><li>Wrap the LLM call with <strong>retry + exponential backoff on <code>429</code>/<code>5xx</code>/timeout</strong>
+and a <strong>model fallback list</strong> (litellm <code>fallbacks=[...]</code>). A customer-facing
+agent must not hard-fail on a provider rate limit mid-checkout.</li></ul>
+<h3>7.5 — Secrets (gap #9)</h3>
+<ul><li>Platform tokens, payment keys, and MCP credentials come from a <strong>secret manager /
+env injection per tenant</strong> — never committed files, never sent to the model.</li></ul>
+<p class="acc">Load test sustains target concurrent customers; per-tenant cost is reported; a simulated provider <code>429</code> is retried/failed-over, not fatal; no secret appears in logs or prompts.</p>
+</div>
+
+<div class="phase" id="p8">
+<h2>Phase 8 — Testing &amp; rollout</h2>
+<h3>8.1 — Unit</h3>
+<ul><li>identity scoping, tool lockdown, confirmation gate, idempotency, PII redaction.</li></ul>
+<h3>8.2 — Integration</h3>
+<ul><li>Mock platform APIs; full browse → cart → checkout → order-status; refund flow.</li></ul>
+<h3>8.3 — Security review</h3>
+<ul><li>Red-team: injection, cross-customer access, RCE attempts, payment edge cases.</li></ul>
+<h3>8.4 — Rollout</h3>
+<ul><li>Shadow / limited cohort → flagged GA; start read-only (Q&amp;A + browse), enable checkout after safety sign-off.</li></ul>
+<p class="acc">Security review passed; staged rollout plan with kill switch.</p>
+</div>
+
+<hr>
+<h2>Definition of Done</h2>
+<ul class="dod">
+<li>Phase 0 sockets are <strong>capability-agnostic</strong> (kernel never says "e-commerce").</li>
+<li>Customer profile = locked <code>tools_override</code> + identity context + customer hooks.</li>
+<li>Commerce state stays in the platform; agent is stateless w.r.t. it.</li>
+<li>Money actions are confirmed, idempotent, spend-limited, audited.</li>
+<li><strong>Resilient &amp; sealed:</strong> untrusted RAG/API text quarantined (#1); provider retry + fallback (#6); secrets from a secret manager, never in logs/prompts (#9).</li>
+<li>e-commerce ships as a <strong>pack + deployment profile</strong>; removing it needs <strong>zero</strong> kernel edits.</li>
+</ul>
+
+<hr>
+<blockquote class="principle">
+<strong>Shared note across both plans.</strong> Phase 0 in <em>both</em> files builds the
+<em>same</em> generic sockets (MCP client, capability pack contract; plus identity / hooks /
+sessions for customer-facing). Build them <strong>once</strong>. After that, deep research
+and e-commerce — and every future capability — are added as <strong>packs + (optional)
+deployment profiles</strong>, never by editing the kernel. <em>Wire the house once, then
+just plug things in.</em>
+</blockquote>
+
+</div>
+</body>
+</html>

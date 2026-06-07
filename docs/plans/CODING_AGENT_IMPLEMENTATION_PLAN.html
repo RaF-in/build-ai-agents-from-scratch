@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coding Agent &amp; Plan Mode — Implementation Plan</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --text:#e6edf3; --muted:#9aa7b4; --accent:#58a6ff; --accent2:#7ee787;
+    --warn:#f0883e; --pill:#8957e5; --code:#0b1220;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+       line-height:1.65;font-size:16px}
+  .wrap{max-width:960px;margin:0 auto;padding:48px 24px 96px}
+  h1{font-size:2rem;margin:0 0 4px;letter-spacing:-.02em}
+  .sub{color:var(--muted);margin:0 0 28px}
+  h2{font-size:1.4rem;margin:44px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+  h3{font-size:1.08rem;margin:26px 0 8px;color:var(--accent)}
+  p{margin:10px 0}
+  code{background:var(--code);padding:2px 6px;border-radius:5px;font-size:.86em;
+       font-family:"SF Mono",Menlo,Consolas,monospace;color:#ffa657}
+  pre{background:var(--code);border:1px solid var(--border);border-radius:10px;
+      padding:16px;overflow:auto;font-size:.82rem;line-height:1.5}
+  pre code{background:none;padding:0;color:#c9d1d9}
+  blockquote{margin:18px 0;padding:14px 18px;background:var(--panel);
+             border-left:4px solid var(--accent);border-radius:0 8px 8px 0;color:var(--muted)}
+  blockquote strong{color:var(--text)}
+  .principle{border-left-color:var(--accent2)}
+  .warn{background:#3a230f;border:1px solid #7a2d12;border-left:4px solid var(--warn);
+        color:#ffd7b5;padding:14px 18px;border-radius:0 8px 8px 0;margin:18px 0}
+  .warn strong{color:#ffb37a}
+  table{border-collapse:collapse;width:100%;margin:14px 0;font-size:.92rem}
+  th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--accent)}
+  tr:nth-child(even) td{background:rgba(255,255,255,.02)}
+  ul{margin:8px 0;padding-left:22px}
+  li{margin:5px 0}
+  .phase{background:var(--panel);border:1px solid var(--border);border-radius:14px;
+         padding:6px 24px 20px;margin:22px 0}
+  .pill{display:inline-block;background:var(--pill);color:#fff;font-size:.7rem;
+        font-weight:700;letter-spacing:.06em;padding:3px 10px;border-radius:20px;
+        vertical-align:middle;margin-left:8px}
+  .acc{color:var(--accent2);font-size:.9rem}
+  .acc::before{content:"✓ ";font-weight:700}
+  hr{border:none;border-top:1px solid var(--border);margin:36px 0}
+  .dod li{list-style:none;margin-left:-22px}
+  .dod li::before{content:"☐ ";color:var(--muted)}
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 22px;margin:24px 0}
+  .toc a{color:var(--accent);text-decoration:none;font-size:.92rem}
+  .toc a:hover{text-decoration:underline}
+  .toc ol{margin:6px 0;padding-left:20px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Coding Agent &amp; Plan Mode</h1>
+<p class="sub">Production Implementation Plan · enhance the main agent, reuse existing sockets — coding is not a spawned capability</p>
+
+<blockquote class="principle">
+<strong>Guiding principle:</strong> Coding is <strong>not</strong> a spawned capability pack
+like research or e-commerce. Your <strong>main agent already <em>is</em> a coding agent</strong> —
+its <code>ReadTool</code>, <code>WriteTool</code>, <code>EditTool</code>, <code>BashTool</code>,
+<code>SpawnSubagentTool</code>, skills, and sessions are the Claude-Code toolset. We
+<strong>enhance the main agent</strong> and <strong>reuse the generic sockets</strong> from the
+other plans (<code>RunPolicy</code>, pre-tool gate, subagents, budgets). Coding stays in the
+main loop because the user reviews every change and it mutates the real repo (shared, mutable state).
+</blockquote>
+
+<div class="toc">
+<strong>Phases</strong>
+<ol>
+<li><a href="#p0">Phase 0 — Kernel reuse (almost nothing new)</a></li>
+<li><a href="#p1">Phase 1 — Code navigation tools (biggest gap)</a></li>
+<li><a href="#p2">Phase 2 — Coding playbook (SKILL.md)</a></li>
+<li><a href="#p3">Phase 3 — Auto plan + execute (agent-decided, no gate)</a></li>
+<li><a href="#p4">Phase 4 — Interactive plan mode (user-toggled, approval)</a></li>
+<li><a href="#p5">Phase 5 — Guardrails (simple)</a></li>
+<li><a href="#p6">Phase 6 — Budgeting &amp; context management</a></li>
+<li><a href="#p7">Phase 7 — Verification loop</a></li>
+<li><a href="#p8">Phase 8 — Observability &amp; testing</a></li>
+</ol>
+</div>
+
+<h2>0. Architecture at a glance</h2>
+<pre><code>Main agent (the coding agent — same single runtime)
+  │
+  ├─ Tools: Read, Write, Edit, Bash  + NEW: Grep, Glob, (symbol search)
+  │
+  ├─ DefaultPolicy (resting)
+  │     • simple task  → answer/edit directly, no todos
+  │     • complex task → agent OPTS IN to a todo list → auto plan+execute (NO approval gate)
+  │
+  ├─ /plan  (USER toggle, slash command)
+  │     → InteractivePlanPolicy: plan → STOP &amp; wait for approval → execute → revert
+  │
+  ├─ Pre-tool gate (reused): approve risky bash / writes outside workspace
+  │
+  └─ Subagents (reused): parallel "explore the codebase" workers (depth budget)</code></pre>
+
+<p><strong>Three behaviors, two policies</strong> (the key model):</p>
+<table>
+<tr><th>Task</th><th>Policy</th><th>Todos?</th><th>Approval gate?</th><th>Decided by</th></tr>
+<tr><td>Simple ("what does X do?")</td><td><code>DefaultPolicy</code></td><td>no</td><td>no</td><td>agent</td></tr>
+<tr><td>Complex ("refactor auth")</td><td><code>DefaultPolicy</code></td><td>yes (agent opts in)</td><td><strong>no — auto-execute</strong></td><td><strong>agent</strong></td></tr>
+<tr><td>User wants to review first</td><td><code>InteractivePlanPolicy</code></td><td>yes</td><td><strong>yes — stop &amp; approve</strong></td><td><strong>user</strong> (<code>/plan</code>)</td></tr>
+</table>
+<p><strong>Where logic lives:</strong> raw actions = tools; <em>how to code well</em> =
+<code>coding/SKILL.md</code>; <em>plan/approve flow</em> = the policies. Never bury coding
+judgment in <code>execute()</code>.</p>
+
+<hr>
+
+<div class="phase" id="p0">
+<h2>Phase 0 — Kernel reuse (almost nothing new) <span class="pill">REUSE</span></h2>
+<blockquote>Coding introduces <strong>no new kernel concepts</strong>. It reuses sockets from
+the research &amp; e-commerce plans. The only genuinely new kernel line is making the policy swappable.</blockquote>
+<h3>0.1 — Swappable policy + <code>set_policy</code> (the one small addition)</h3>
+<p><strong>Why:</strong> the main agent is built once with <code>DefaultPolicy</code>;
+<code>/plan</code> must flip it at runtime.</p>
+<ul>
+<li>Keep <code>self.default_policy</code> and <code>self.policy</code> on <code>AgentRuntime</code>; add <code>_set_policy(p)</code> → <code>self.policy = p</code>.</li>
+<li>Expose <code>context.set_policy</code> / <code>context.default_policy</code> callbacks wired in <code>__init__</code>.</li>
+<li>The kernel already reads <code>self.policy</code> fresh each turn, so a swap takes effect next turn — no other kernel change.</li>
+</ul>
+<p class="acc"><code>/plan</code> can switch policy mid-session and revert; default behavior unchanged otherwise.</p>
+<h3>0.2 — Reused sockets (already specified elsewhere)</h3>
+<ul>
+<li><strong><code>RunPolicy</code></strong> + completion gate — research plan (0.6).</li>
+<li><strong>Pre-tool approval gate</strong> — e-commerce plan (0.3): allow / deny / require-confirmation before a tool runs.</li>
+<li><strong>Subagents + depth budget</strong> — research plan (0.1) for parallel codebase exploration.</li>
+<li><strong>Per-turn tool-call budget</strong> — already exists (<code>max_tool_calls_per_turn = 10</code>, <code>agent.py:64</code>).</li>
+<li><strong>Provider retry + model fallback</strong> — both plans (litellm <code>fallbacks=[...]</code>).</li>
+</ul>
+<p class="acc">No duplicate machinery; coding wires into existing sockets.</p>
+</div>
+
+<div class="phase" id="p1">
+<h2>Phase 1 — Code navigation tools (the biggest real gap)</h2>
+<div class="warn">Today the agent can only <code>Read</code> by exact path. Claude Code lives on
+<strong>search</strong>. Without this the agent can't find anything and blows context reading whole files.</div>
+<h3>1.1 — <code>GrepTool</code> (content search)</h3>
+<ul><li>Wrap <code>ripgrep</code> (<code>rg</code>) if present, else Python fallback. Args: <code>pattern</code>, optional <code>path</code>, <code>glob</code>, <code>-i</code>. Return file:line matches, <strong>capped</strong> (~100) to protect context.</li></ul>
+<h3>1.2 — <code>GlobTool</code> (file-name search)</h3>
+<ul><li>Find files by pattern (<code>**/*.py</code>, <code>src/**/test_*.py</code>). Sort by mtime; cap results.</li></ul>
+<h3>1.3 — (Optional) symbol / codebase search</h3>
+<ul><li>"find definition/usages" (ctags/LSP or embeddings) — add later; <code>Grep</code> covers 80%.</li></ul>
+<h3>1.4 — Read with ranges</h3>
+<ul><li>Extend <code>ReadTool</code> with optional <code>offset</code>/<code>limit</code> so the agent reads slices, not 5k-line files.</li></ul>
+<p class="acc">The agent locates code by content/name and reads only the relevant slice; register these in the main agent's <code>TOOLS</code>.</p>
+</div>
+
+<div class="phase" id="p2">
+<h2>Phase 2 — Coding playbook (<code>coding/SKILL.md</code>)</h2>
+<h3>2.1 — Behavior rules (markdown, no code)</h3>
+<ul>
+<li><strong>Search before read</strong>; read slices, not whole files.</li>
+<li><strong>Minimal, surgical edits</strong>; match existing style/conventions.</li>
+<li><strong>Verify after editing</strong> (run tests/build/lint; read errors; fix).</li>
+<li><strong>Don't commit/push unless asked</strong>; never invent APIs — check the codebase first.</li>
+<li><strong>For complex tasks, make a todo list</strong>; for simple ones, just answer.</li>
+</ul>
+<h3>2.2 — Discovery</h3>
+<ul><li>Drop <code>coding/SKILL.md</code>; existing <code>skill_manager.discover()</code> loads it (name+description in prompt, body on invoke). No code.</li></ul>
+<p class="acc">The skill is listed; invoking it injects the playbook.</p>
+</div>
+
+<div class="phase" id="p3">
+<h2>Phase 3 — Auto plan + execute (agent-decided, no gate)</h2>
+<blockquote>The default path for complex tasks: the agent <strong>opts into</strong> a todo list
+and runs it to completion autonomously — <strong>no approval stop</strong>. This is Claude
+Code's <code>TodoWrite</code>.</blockquote>
+<h3>3.1 — Optional todo tool</h3>
+<ul><li>A <code>TodoWriteTool</code> (add/update/complete) available in <code>DefaultPolicy</code>. Used only for multi-step work; simple tasks never call it.</li></ul>
+<h3>3.2 — Completion gate (no-op when empty)</h3>
+<ul><li><code>DefaultPolicy.on_idle</code>: if <code>todos</code> exist and unfinished → re-inject "finish your todos" and continue; if none → finish normally. <strong>No approval gate.</strong></li></ul>
+<h3>3.3 — Loop safety (simple)</h3>
+<ul><li><code>max_continuations</code> cap + repeated-identical-tool-call detector → abort with a partial summary (no infinite loops).</li></ul>
+<p class="acc">A complex task auto-plans and finishes all todos; a simple task creates none; a stuck loop aborts cleanly.</p>
+</div>
+
+<div class="phase" id="p4">
+<h2>Phase 4 — Interactive plan mode (user-toggled, with approval)</h2>
+<blockquote>Separate from auto-execute. Activated <strong>only by the user</strong>, never by the LLM.</blockquote>
+<h3>4.1 — <code>/plan</code> slash command (the toggle)</h3>
+<ul><li>In <code>slash_commands.py</code>, <code>/plan</code> swaps <code>runtime.policy</code> between <code>default_policy</code> and <code>InteractivePlanPolicy()</code> (prints the state). Returns "handled" so it skips the LLM.</li></ul>
+<h3>4.2 — <code>InteractivePlanPolicy</code></h3>
+<ul>
+<li>Plan phase: agent researches + proposes a plan, then <strong>ends the turn and waits</strong> (<code>awaiting_approval = True</code>; <code>on_idle → False</code> so control returns to the user).</li>
+<li>Approval: the user's next "approve/go ahead" flips to execute; edits keep it in plan mode.</li>
+<li>On completion: revert to <code>default_policy</code>.</li>
+</ul>
+<h3>4.3 — Read-only safety in plan phase</h3>
+<ul><li>While planning, restrict to read/search tools (no Write/Edit/Bash-mutations) via <code>active_tools</code> — so "plan mode" genuinely cannot change the repo before approval.</li></ul>
+<p class="acc"><code>/plan</code> → agent plans and stops; nothing is modified until the user approves; <code>/plan</code> again returns to auto-execute.</p>
+</div>
+
+<div class="phase" id="p5">
+<h2>Phase 5 — Guardrails (simple, production-grade)</h2>
+<blockquote>All deliberately lightweight; most reuse the pre-tool gate (0.2).</blockquote>
+<h3>5.1 — Bash safety</h3>
+<ul><li><strong>Pre-tool gate</strong> requires confirmation for destructive commands (small denylist: <code>rm -rf</code>, <code>git push --force</code>, fork bombs, disk/format, <code>sudo</code>).</li>
+<li>Keep the existing <strong>timeout</strong>; run with <code>cwd</code> confined to the project; cap output size.</li></ul>
+<h3>5.2 — Write/edit safety</h3>
+<ul><li>Confine writes to the project root by default; <strong>require confirmation</strong> to write/edit outside it.</li>
+<li><code>EditTool</code> already checks uniqueness (<code>agent_tools.py:70-84</code>) — keep it; prefer edit over full rewrite.</li></ul>
+<h3>5.3 — Secret hygiene</h3>
+<ul><li>Refuse to read obvious secret files (<code>.env</code>, <code>*.pem</code>, <code>id_rsa</code>) unless explicitly asked; <strong>redact</strong> secret-looking strings in output (<code>on_tool_result</code> hook).</li></ul>
+<h3>5.4 — Git safety</h3>
+<ul><li>Never commit/push unless asked; if on the default branch, branch first; never <code>--force</code> without confirmation.</li></ul>
+<h3>5.5 — Untrusted content</h3>
+<ul><li>If the agent fetches docs/web while coding, treat that text as <strong>data, not instructions</strong> (same delimiter+preamble as the research plan).</li></ul>
+<p class="acc">Destructive commands and out-of-workspace writes are gated; secrets aren't leaked; git actions are safe by default.</p>
+</div>
+
+<div class="phase" id="p6">
+<h2>Phase 6 — Budgeting &amp; context management</h2>
+<h3>6.1 — Per-turn / per-task budget</h3>
+<ul><li>Reuse the per-turn tool-call cap (<code>max_tool_calls_per_turn</code>); add a soft per-task budget (max tool calls / tokens) for long auto-execute runs → graceful "summarize progress" wrap-up.</li></ul>
+<h3>6.2 — Context discipline (the real cost driver)</h3>
+<ul>
+<li><strong>Search before read; read slices, not whole files</strong> (1.4) — the #1 way to keep context (and cost) bounded on large repos.</li>
+<li><strong>Offload exploration to subagents:</strong> "find everywhere X is used / how Y works" runs in a silent subagent that returns a summary, keeping the main context clean (reuses depth budget).</li>
+<li>Trigger the existing <code>CompactionEvent</code> path when the main context grows large.</li>
+</ul>
+<h3>6.3 — Provider resilience</h3>
+<ul><li>Retry + backoff on <code>429</code>/<code>5xx</code>; model fallback list (litellm) — a long coding session must not die on a rate limit.</li></ul>
+<p class="acc">A long task stays within budget (or wraps up gracefully); big-repo work doesn't explode context; provider rate limits are retried, not fatal.</p>
+</div>
+
+<div class="phase" id="p7">
+<h2>Phase 7 — Verification loop</h2>
+<h3>7.1 — Run-and-fix</h3>
+<ul><li>After edits, the playbook drives: run the project's tests/build/lint via <code>BashTool</code>, read failures, fix, repeat (bounded by the task budget).</li></ul>
+<h3>7.2 — Don't claim success blindly</h3>
+<ul><li>Report what was run and the actual result; if tests fail, say so with output (no false "done").</li></ul>
+<p class="acc">Edits are followed by a real verification step; outcomes are reported truthfully.</p>
+</div>
+
+<div class="phase" id="p8">
+<h2>Phase 8 — Observability &amp; testing</h2>
+<h3>8.1 — Observability</h3>
+<ul><li>Per-task log: tools used, files changed, commands run, tokens/cost, duration; trace into exploration subagents.</li></ul>
+<h3>8.2 — Unit tests</h3>
+<ul><li><code>Grep</code>/<code>Glob</code> correctness + caps; policy swap via <code>/plan</code>; completion gate no-op when no todos; <code>max_continuations</code> abort; bash denylist + out-of-workspace write gating; secret redaction.</li></ul>
+<h3>8.3 — Integration tests</h3>
+<ul><li>A fixed repo fixture: search → edit → run tests → fix loop; plan-mode stop-and-approve flow.</li></ul>
+<h3>8.4 — Rollout</h3>
+<ul><li>Ship nav tools + skill first (low risk); enable auto plan+execute; enable <code>/plan</code>; turn on bash/write gating before any unattended use. Behind a flag; kill switch.</li></ul>
+<p class="acc">Green unit + integration; a real change is made, verified, and reported.</p>
+</div>
+
+<hr>
+<h2>Definition of Done</h2>
+<ul class="dod">
+<li>Coding lives in the <strong>main agent</strong> — no spawned "coding capability"; subagents used only for exploration.</li>
+<li><strong>Only new kernel line:</strong> swappable <code>self.policy</code> + <code>set_policy</code>; everything else reuses existing sockets.</li>
+<li>Navigation tools (<code>Grep</code>/<code>Glob</code>/ranged <code>Read</code>) registered; <code>coding/SKILL.md</code> discovered.</li>
+<li><strong>Three behaviors, two policies:</strong> simple (no todos), complex (auto todos, no gate), <code>/plan</code> (user-toggled, approval gate). LLM never self-enters interactive plan mode.</li>
+<li><strong>Guardrails:</strong> bash denylist + confirm; writes confined to workspace; secret redaction; git-safe defaults; untrusted content quarantined.</li>
+<li><strong>Budgeted &amp; resilient:</strong> per-task budget with graceful wrap-up; search-before-read + subagent offload; provider retry + fallback; <code>max_continuations</code> loop cap.</li>
+<li>Edits are <strong>verified</strong> (tests/build run) and outcomes reported truthfully.</li>
+</ul>
+
+</div>
+</body>
+</html>
