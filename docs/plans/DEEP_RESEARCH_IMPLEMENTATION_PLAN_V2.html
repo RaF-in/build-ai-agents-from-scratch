@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deep Research Agent — Implementation Plan v2</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.7;
+            color: #1a1a1a;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 40px;
+            border-radius: 12px;
+            margin-bottom: 40px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 15px;
+            font-weight: 700;
+        }
+
+        .header .subtitle {
+            font-size: 1.2rem;
+            opacity: 0.95;
+        }
+
+        .badge {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-top: 15px;
+        }
+
+        .content {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        }
+
+        h2 {
+            color: #667eea;
+            font-size: 1.8rem;
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        h3 {
+            color: #764ba2;
+            font-size: 1.4rem;
+            margin: 30px 0 15px 0;
+        }
+
+        h4 {
+            color: #4a5568;
+            font-size: 1.1rem;
+            margin: 20px 0 10px 0;
+        }
+
+        p {
+            margin-bottom: 15px;
+        }
+
+        pre {
+            background: #1a1a2e;
+            color: #eaeaea;
+            padding: 20px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 20px 0;
+            font-size: 0.9rem;
+        }
+
+        code {
+            background: #f7f7f7;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+
+        pre code {
+            background: transparent;
+            padding: 0;
+        }
+
+        .diagram {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 25px 0;
+            border-left: 4px solid #667eea;
+        }
+
+        .diagram pre {
+            background: transparent;
+            color: #1a1a1a;
+            padding: 0;
+        }
+
+        ul, ol {
+            margin-left: 25px;
+            margin-bottom: 15px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        .removed {
+            background: #fee;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #e53e3e;
+        }
+
+        .removed h3 {
+            color: #e53e3e;
+            margin-top: 0;
+        }
+
+        .new {
+            background: #f0fff4;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #38a169;
+        }
+
+        .new h3 {
+            color: #38a169;
+            margin-top: 0;
+        }
+
+        .info-box {
+            background: #ebf8ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #4299e1;
+        }
+
+        .warning-box {
+            background: #fffaf0;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #ed8936;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        th {
+            background: #f7f7f7;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        tr:hover {
+            background: #f9f9f9;
+        }
+
+        .checklist {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .checklist li {
+            padding: 8px 0 8px 30px;
+            position: relative;
+        }
+
+        .checklist li:before {
+            content: '□';
+            position: absolute;
+            left: 0;
+            font-size: 1.2em;
+            color: #667eea;
+        }
+
+        .checklist li.checked:before {
+            content: '☑';
+        }
+
+        .file-tree {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .file-tree code {
+            font-family: 'Fira Code', monospace;
+        }
+
+        .phase-number {
+            display: inline-block;
+            width: 35px;
+            height: 35px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 35px;
+            margin-right: 10px;
+            font-weight: 600;
+        }
+
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .comparison-column {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        .comparison-column h4 {
+            margin-top: 0;
+            text-align: center;
+        }
+
+        .toc {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+        }
+
+        .toc h3 {
+            margin-top: 0;
+            color: #667eea;
+        }
+
+        .toc ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .toc a {
+            color: #4a5568;
+            text-decoration: none;
+            display: block;
+            padding: 5px 0;
+        }
+
+        .toc a:hover {
+            color: #667eea;
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+            .header {
+                background: #667eea;
+                color: white;
+            }
+            .content {
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Deep Research Agent — Implementation Plan v2</h1>
+            <p class="subtitle">Tool-Level Plan/Execute with Shared Components and Guardrails</p>
+            <span class="badge">Capability Pack Architecture</span>
+            <span class="badge">LLM-Autonomous Orchestration</span>
+        </div>
+
+        <div class="content">
+            <blockquote style="background: #f0f9ff; padding: 20px; border-left: 4px solid #0ea5e9; margin: 25px 0; border-radius: 0 8px 8px 0;">
+                <p><strong>Guiding principle:</strong> Deep research is a <strong>capability pack</strong> with tool-level plan/execute/todos. The kernel stays minimal and capability-agnostic. Plan/execute behaviors emerge from tool definitions and LLM autonomy, not from kernel state machines.</p>
+            </blockquote>
+
+            <nav class="toc">
+                <h3>Table of Contents</h3>
+                <ul>
+                    <li><a href="#architecture-overview">Architecture Overview</a></li>
+                    <li><a href="#phase-0-kernel-generalizations">Phase 0 — Kernel Generalizations</a></li>
+                    <li><a href="#phase-1-shared-tool-infrastructure">Phase 1 — Shared Tool Infrastructure</a></li>
+                    <li><a href="#phase-2-research-tool-layer">Phase 2 — Research Tool Layer</a></li>
+                    <li><a href="#phase-3-deep-research-capability">Phase 3 — Deep Research Capability</a></li>
+                    <li><a href="#phase-4-testing-verification">Phase 4 — Testing & Verification</a></li>
+                    <li><a href="#phase-5-mcp-configuration">Phase 5 — MCP Configuration</a></li>
+                    <li><a href="#phase-6-capability-pack-loader">Phase 6 — Capability Pack Loader</a></li>
+                    <li><a href="#phase-7-documentation">Phase 7 — Documentation</a></li>
+                    <li><a href="#phase-8-rollout-plan">Phase 8 — Rollout Plan</a></li>
+                    <li><a href="#definition-of-done">Definition of Done</a></li>
+                    <li><a href="#differences-from-v1-plan">Differences from v1 Plan</a></li>
+                    <li><a href="#future-extensions">Future Extensions</a></li>
+                </ul>
+            </nav>
+
+            <h2 id="architecture-overview">Architecture Overview</h2>
+
+            <div class="diagram">
+                <pre style="background: transparent; color: #1a1a1a;">User: "Research X, focus on 2023-2025."
+    │
+Main agent (DefaultPolicy, depth 0)
+    │  LLM picks the tool → DeepResearchTool(query="...") ← Tool selection = LLM decision
+    ▼
+DeepResearchTool.execute()
+    │  Creates research context with TodoList
+    │  Defines research tools (todo + search + fetch)
+    ▼
+Research subagent (silent, depth 1)
+    │  Single while loop with all tools available
+    │  LLM autonomously: adds todos → executes → synthesizes
+    │  Guardrail tools enforce completion
+    ▼
+Returns cited report → Main agent presents to user</pre>
+            </div>
+
+            <p><strong>Capability shape:</strong> <em>read-heavy, autonomous, returns one artifact.</em></p>
+            <p><strong>Logic distribution:</strong></p>
+            <ul>
+                <li>How to call sources → MCP/native tools</li>
+                <li>How stages connect → LLM autonomous tool use</li>
+                <li>How to judge/format → <code>deep-research/SKILL.md</code></li>
+                <li>Completion enforcement → Tool-level guardrails</li>
+            </ul>
+
+            <h2 id="phase-0-kernel-generalizations">Phase 0 — Kernel Generalizations (Capability-Agnostic)</h2>
+
+            <div class="info-box">
+                <p>These are the ONLY kernel changes. Nothing mentions "research." Each becomes a reusable socket.</p>
+            </div>
+
+            <h3 id="depth-budget">0.1 — Depth Budget (Replace Structural Depth-1 Ban)</h3>
+            <p><strong>Why:</strong> Today <code>child_tools()</code> never includes <code>SpawnSubagentTool</code>, so children can't fan out. Research needs lead → workers.</p>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Add <code>depth: int = 0</code> and <code>max_depth: int = 2</code> to <code>AgentContext</code> (<code>tool_base.py</code>)</li>
+                <li>In <code>SpawnSubagentTool.execute</code>, allow spawning only while <code>context.depth < context.max_depth</code></li>
+                <li>Pass child context with <code>depth + 1</code></li>
+                <li>Make <code>child_tools()</code> include <code>SpawnSubagentTool</code> conditionally on remaining depth</li>
+            </ul>
+            <p><strong>Acceptance:</strong> Lead can spawn workers; worker at <code>max_depth</code> cannot; existing single spawns still pass.</p>
+
+            <h3 id="shared-workspace">0.2 — Shared Workspace (Replace Summary-Only Return)</h3>
+            <p><strong>Why:</strong> <code>_final_summary</code> returns only last text — too thin for dozens of sources + citations.</p>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Add <code>workspace_dir: str | None = None</code> to <code>AgentContext</code></li>
+                <li>Create per-run temp directory in capability tools (not kernel)</li>
+                <li>Pass same workspace to all workers in a run</li>
+                <li>Workers persist findings via <code>WriteTool</code>; lead reads via <code>ReadTool</code></li>
+                <li>Keep tool return short; payload lives in files</li>
+            </ul>
+            <p><strong>Acceptance:</strong> Worker writes findings; lead reads all findings files.</p>
+
+            <h3 id="per-run-budget-parallel-fan-out">0.3 — Per-Run Budget + Parallel Fan-Out</h3>
+            <p><strong>What is ALREADY handled:</strong> Failure isolation exists. <code>SpawnSubagentTool.execute</code> never raises; tool loop collects results independently.</p>
+            <p><strong>What is missing:</strong></p>
+            <ol>
+                <li><strong>Total run budget</strong> — no ceiling on total tool calls/tokens/cost per run</li>
+                <li><strong>Parallel fan-out</strong> — tool loop is sequential <code>await</code>, concurrency cap dormant</li>
+            </ol>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Add <code>RunBudget</code> (max tool calls, max tokens/$, wall-clock) as counter on <code>AgentContext</code></li>
+                <li>Check budget in <code>run_tool</code> before dispatch; reject when exhausted</li>
+                <li>Change loop at <code>agent.py:193</code> to <code>await asyncio.gather(*[run_tool(...) for tc in tool_calls])</code></li>
+                <li>Plain <code>gather</code> is safe (run_tool returns <code>ToolResult</code> on failure)</li>
+            </ul>
+            <p><strong>Acceptance:</strong> Run stops cleanly on budget exhaustion; multiple workers run concurrently; 1 worker failure doesn't abort others.</p>
+
+            <h3 id="mcp-client-tool-source">0.4 — MCP Client Tool Source</h3>
+            <p><strong>Why:</strong> Reach (search, fetch, APIs) should come from MCP, not hand-written Python.</p>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Add MCP client module: connect to configured servers, list tools</li>
+                <li>Convert MCP tool defs → <code>AgentTool.to_schema()</code> shape</li>
+                <li>Merge in <code>AgentRuntime.get_tools()</code></li>
+                <li>Route names not in <code>self.tools</code> to MCP client</li>
+            </ul>
+            <p><strong>Acceptance:</strong> MCP-provided <code>web_search</code> tool callable end-to-end.</p>
+
+            <h3 id="capability-pack-contract">0.5 — Capability Pack Contract (Future Packs Need Zero Kernel Edits)</h3>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Define folder convention: <code>capabilities/<name>/</code> with optional <code>SKILL.md</code>, <code>mcp.json</code>, <code>orchestrator.py</code></li>
+                <li>Loader discovers packs, registers entry-point tools, connects MCP servers</li>
+                <li><strong>Progressive disclosure (critical):</strong>
+                    <ul>
+                        <li>Skills: only name + 1-line description in prompt</li>
+                        <li>Tools: register only entry-point tool (e.g., one <code>DeepResearchTool</code>)</li>
+                        <li>Sub-tools live in worker <code>tools_override</code> only</li>
+                        <li>If entry-tools grow, add <code>discover_capability</code> router tool</li>
+                    </ul>
+                </li>
+            </ul>
+            <p><strong>Acceptance:</strong> Dropping pack folder makes capability available with zero kernel change; adding pack doesn't grow main prompt measurably.</p>
+
+            <div class="removed">
+                <h3>❌ REMOVED — No PlanExecutePolicy in Kernel</h3>
+                <p><strong>What was removed from v1:</strong></p>
+                <ul>
+                    <li><del>RunPolicy protocol</del></li>
+                    <li><del>PlanExecutePolicy</del></li>
+                    <li><del>on_idle gate</del></li>
+                    <li><del>GeneratePlanTool, ModifyTodoTool in kernel</del></li>
+                    <li><del>Mode switching logic</del></li>
+                </ul>
+                <p><strong>Why:</strong> Plan/execute/todos are tool-level behaviors, not kernel features.</p>
+            </div>
+
+            <h2 id="phase-1-shared-tool-infrastructure">Phase 1 — Shared Tool Infrastructure (New)</h2>
+
+            <div class="info-box">
+                <p>Reusable components that multiple capabilities can use. No kernel dependencies.</p>
+            </div>
+
+            <h3 id="todo-data-structures">1.1 — Todo Data Structures</h3>
+            <p><strong>File:</strong> <code>capabilities/shared/todo_structures.py</code></p>
+            <pre><code>"""Shared todo structures. Reusable across capabilities."""
+
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+@dataclass
+class Todo:
+    """A single todo item in a plan."""
+    id: str
+    description: str
+    status: Literal["pending", "in_progress", "completed", "abandoned"] = "pending"
+    result: Any = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    abandon_reason: str | None = None
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+@dataclass
+class TodoList:
+    """A collection of todos with management methods."""
+    todos: list[Todo] = field(default_factory=list)
+
+    def add(self, description: str, metadata: dict | None = None) -> str:
+        """Add a new todo and return its ID."""
+        todo = Todo(
+            id=str(len(self.todos) + 1),
+            description=description,
+            metadata=metadata or {}
+        )
+        self.todos.append(todo)
+        return todo.id
+
+    def complete(self, todo_id: str) -> bool:
+        """Mark a todo as completed."""
+        for t in self.todos:
+            if t.id == todo_id:
+                t.status = "completed"
+                return True
+        return False
+
+    def modify(self, todo_id: str, new_description: str) -> bool:
+        """Modify a todo's description."""
+        for t in self.todos:
+            if t.id == todo_id:
+                t.description = new_description
+                return True
+        return False
+
+    def abandon(self, todo_id: str, reason: str) -> bool:
+        """Mark a todo as abandoned."""
+        for t in self.todos:
+            if t.id == todo_id:
+                t.status = "abandoned"
+                t.abandon_reason = reason
+                return True
+        return False
+
+    def get_pending(self) -> list[Todo]:
+        """Get all pending or in-progress todos."""
+        return [t for t in self.todos if t.status in ("pending", "in_progress")]
+
+    def get_complete_or_abandoned(self) -> list[Todo]:
+        """Get all completed or abandoned todos."""
+        return [t for t in self.todos if t.status in ("completed", "abandoned")]
+
+    def is_complete(self) -> bool:
+        """Check if all todos are complete or abandoned."""
+        return all(t.status in ("completed", "abandoned") for t in self.todos)</code></pre>
+
+            <h3 id="todo-management-tools">1.2 — Todo Management Tools</h3>
+            <p><strong>File:</strong> <code>capabilities/shared/todo_tools.py</p>
+            <pre><code>"""Shared todo management tools. Any capability can compose these."""
+
+from tool_base import AgentContext, AgentTool, ToolResult
+from .todo_structures import TodoList
+
+class AddTodoTool(AgentTool):
+    """Add a todo to your plan.
+
+    Use this to:
+    - Plan your approach before starting work
+    - Break down complex tasks into sub-steps
+    - Add follow-up items if you discover gaps
+
+    Each todo should be specific and actionable.
+    """
+    description: str
+    metadata: dict | None = None
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        if not hasattr(context, 'todo_list') or context.todo_list is None:
+            context.todo_list = TodoList()
+
+        todo_id = context.todo_list.add(self.description, self.metadata)
+
+        return self.tool_result(result={
+            "todo_id": todo_id,
+            "description": self.description,
+            "status": "added"
+        })
+
+class CompleteTodoTool(AgentTool):
+    """Mark a todo as completed.
+
+    Call this when you have successfully finished the work described in a todo.
+    """
+    todo_id: str
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        if not hasattr(context, 'todo_list') or context.todo_list is None:
+            return self.tool_result(error=True, result={"error": "No todo list exists"})
+
+        if context.todo_list.complete(self.todo_id):
+            todo = next(t for t in context.todo_list.todos if t.id == self.todo_id)
+            return self.tool_result(result={
+                "todo_id": self.todo_id,
+                "status": "completed",
+                "description": todo.description
+            })
+
+        return self.tool_result(error=True, result={
+            "error": f"Todo {self.todo_id} not found"
+        })
+
+class ModifyTodoTool(AgentTool):
+    """Modify an existing todo's description.
+
+    Use this when:
+    - You need to clarify a todo's purpose
+    - The scope of a todo needs adjustment
+    - A todo needs to be split or combined
+    """
+    todo_id: str
+    new_description: str
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        if not hasattr(context, 'todo_list') or context.todo_list is None:
+            return self.tool_result(error=True, result={"error": "No todo list exists"})
+
+        if context.todo_list.modify(self.todo_id, self.new_description):
+            return self.tool_result(result={
+                "todo_id": self.todo_id,
+                "status": "modified",
+                "new_description": self.new_description
+            })
+
+        return self.tool_result(error=True, result={
+            "error": f"Todo {self.todo_id} not found"
+        })
+
+class AbandonTodoTool(AgentTool):
+    """Mark a todo as abandoned if it cannot be completed.
+
+    Use this when:
+    - No relevant information can be found after reasonable effort
+    - The todo is redundant with another completed todo
+    - The todo is not applicable given findings so far
+    - The todo would require resources outside your scope
+
+    Always provide a clear reason for documentation.
+    """
+    todo_id: str
+    reason: str
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        if not hasattr(context, 'todo_list') or context.todo_list is None:
+            return self.tool_result(error=True, result={"error": "No todo list exists"})
+
+        if context.todo_list.abandon(self.todo_id, self.reason):
+            return self.tool_result(result={
+                "todo_id": self.todo_id,
+                "status": "abandoned",
+                "reason": self.reason
+            })
+
+        return self.tool_result(error=True, result={
+            "error": f"Todo {self.todo_id} not found"
+        })
+
+class ListTodosTool(AgentTool):
+    """List all todos and their status.
+
+    Call this to:
+    - Check your progress before finishing
+    - Review what remains to be done
+    - Verify completion before synthesis
+    """
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        if not hasattr(context, 'todo_list') or context.todo_list is None:
+            return self.tool_result(result={"todos": [], "pending_count": 0})
+
+        todos = [
+            {
+                "id": t.id,
+                "description": t.description,
+                "status": t.status,
+                "abandon_reason": t.abandon_reason
+            }
+            for t in context.todo_list.todos
+        ]
+
+        pending = context.todo_list.get_pending()
+
+        return self.tool_result(result={
+            "todos": todos,
+            "pending_count": len(pending),
+            "is_complete": context.todo_list.is_complete()
+        })
+
+class VerifyTodosCompleteTool(AgentTool):
+    """Verify all todos are complete or abandoned.
+
+    You MUST call this tool before generating your final output.
+    This tool enforces completion. If todos are pending, it fails
+    and prevents you from proceeding.
+
+    If this tool fails, address the pending todos (complete or abandon)
+    before calling again.
+    """
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        if not hasattr(context, 'todo_list') or context.todo_list is None:
+            return self.tool_result(result={
+                "status": "verified",
+                "message": "No todos exist. Safe to proceed."
+            })
+
+        if context.todo_list.is_complete():
+            return self.tool_result(result={
+                "status": "verified",
+                "message": "All todos complete or abandoned. Safe to proceed.",
+                "total_todos": len(context.todo_list.todos)
+            })
+
+        pending = context.todo_list.get_pending()
+        return self.tool_result(
+            error=True,
+            result={
+                "error": "Cannot proceed with incomplete todos",
+                "pending_count": len(pending),
+                "pending_todos": [
+                    {"id": t.id, "description": t.description}
+                    for t in pending
+                ],
+                "instruction": "Complete or abandon all pending todos before proceeding"
+            }
+        )
+
+# Export list for easy composition
+TODO_TOOLS = [
+    AddTodoTool,
+    CompleteTodoTool,
+    ModifyTodoTool,
+    AbandonTodoTool,
+    ListTodosTool,
+    VerifyTodosCompleteTool
+]</code></pre>
+
+            <h3 id="execution-guardrails">1.3 — Execution Guardrails</h3>
+            <p><strong>File:</strong> <code>capabilities/shared/guardrails.py</code></p>
+            <pre><code>"""Shared execution guardrails. Reusable safety mechanisms."""
+
+from dataclasses import dataclass, field
+from typing import Any, Callable
+import time
+
+@dataclass
+class ExecutionLimits:
+    """Safety limits for capability execution."""
+    max_iterations: int = 20
+    max_duration_seconds: int = 300
+    max_tool_calls: int = 50
+    max_tokens: int | None = None
+
+    iteration: int = field(default=0, init=False)
+    tool_calls: int = field(default=0, init=False)
+    start_time: float = field(default_factory=time.time, init=False)
+
+    def should_continue(self) -> tuple[bool, str | None]:
+        """Check if execution should continue.
+
+        Returns (should_continue, reason_if_stopping).
+        """
+        self.iteration += 1
+
+        if self.iteration > self.max_iterations:
+            return False, f"Max iterations ({self.max_iterations}) exceeded"
+
+        if time.time() - self.start_time > self.max_duration_seconds:
+            return False, f"Max duration ({self.max_duration_seconds}s) exceeded"
+
+        if self.tool_calls > self.max_tool_calls:
+            return False, f"Max tool calls ({self.max_tool_calls}) exceeded"
+
+        return True, None
+
+    def record_tool_call(self):
+        """Record a tool call for tracking."""
+        self.tool_calls += 1
+
+class CompletionVerifier:
+    """Post-execution verification of todo completion."""
+
+    @staticmethod
+    def verify(context: Any, todo_list_attr: str = "todo_list") -> tuple[bool, list[str]]:
+        """Verify all todos are complete or abandoned.
+
+        Returns (is_complete, list_of_pending_descriptions).
+        """
+        if not hasattr(context, todo_list_attr):
+            return True, []  # No todos = complete
+
+        todo_list = getattr(context, todo_list_attr)
+        if todo_list is None:
+            return True, []
+
+        if todo_list.is_complete():
+            return True, []
+
+        pending = todo_list.get_pending()
+        return False, [t.description for t in pending]
+
+    @staticmethod
+    def generate_warning(pending_todos: list[str]) -> str:
+        """Generate a warning message for incomplete todos."""
+        return f"""You stopped with {len(pending_todos)} todos incomplete:
+
+{chr(10).join(f'- {todo}' for todo in pending_todos)}
+
+Please complete or abandon these todos before finishing.
+Use CompleteTodoTool or AbandonTodoTool for each pending todo."""</code></pre>
+
+            <h2 id="phase-2-research-tool-layer">Phase 2 — Research Tool Layer (The "Reach")</h2>
+
+            <h3 id="search-fetch-tools-via-mcp">2.1 — Search & Fetch Tools via MCP</h3>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Connect web-search MCP server (Brave/SerpAPI-style)</li>
+                <li>Connect URL-fetch/reader tool</li>
+                <li>Add per-call timeouts and result-size caps</li>
+            </ul>
+            <p><strong>File:</strong> <code>capabilities/deep_research/tools.py</code></p>
+            <pre><code>"""Research-specific tools. Compose shared todo tools."""
+
+from capabilities.shared.todo_tools import TODO_TOOLS
+from capabilities.shared.guardrails import ExecutionLimits, CompletionVerifier
+
+# Search and fetch tools (MCP-provided)
+# These would be MCP tools, registered in mcp.json
+
+class WebSearchTool(AgentTool):
+    """Search the web for relevant sources.
+
+    Use this to find:
+    - Academic papers and research
+    - News articles and reports
+    - Technical documentation
+    - Industry analysis
+
+    Returns: titles, URLs, snippets for review.
+    """
+    query: str
+    num_results: int = 10
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        # This would call MCP web search service
+        return self.tool_result(result={
+            "query": self.query,
+            "results": []  # Would contain search results
+        })
+
+class FetchUrlTool(AgentTool):
+    """Fetch and read a web page.
+
+    Use this to:
+    - Read full content from promising search results
+    - Extract specific information from sources
+    - Verify claims and get exact wording for citations
+
+    Returns: page content for extraction and citation.
+    """
+    url: str
+    timeout: int = 30
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        # This would call MCP fetch service
+        return self.tool_result(result={
+            "url": self.url,
+            "content": ""  # Would contain page content
+        })
+
+# Tool sets for different contexts
+RESEARCH_TOOLS = TODO_TOOLS + [
+    WebSearchTool,
+    FetchUrlTool,
+    ReadTool,   # For workspace
+    WriteTool,  # For workspace findings
+]</code></pre>
+
+            <h3 id="ssrf-guard-critical-security">2.2 — SSRF Guard (Critical Security)</h3>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Reject non-http/https URLs</li>
+                <li>Reject private/link-local/loopback IPs</li>
+                <li>~15 lines with <code>ipaddress</code> module</li>
+            </ul>
+            <pre><code>import ipaddress
+from urllib.parse import urlparse
+
+class FetchUrlTool(AgentTool):
+    # ... (previous definition)
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        # SSRF guard
+        if not self._is_url_safe(self.url):
+            return self.tool_result(
+                error=True,
+                result={"error": f"URL rejected: {self.url}"}
+            )
+
+        # Proceed with fetch
+        # ...
+
+    @staticmethod
+    def _is_url_safe(url: str) -> bool:
+        """Check if URL is safe from SSRF attacks."""
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                return False
+
+            hostname = parsed.hostname
+            if not hostname:
+                return False
+
+            # Reject private IPs
+            ip = ipaddress.ip_address(hostname)
+
+            # Private ranges: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+            # Link-local: 169.254.0.0/16
+            # Loopback: 127.0.0.0/8
+            if ip.is_private or ip.is_loopback or ip.is_link_local:
+                return False
+
+            return True
+
+        except (ipaddress.AddressValueError, ValueError):
+            # Not an IP address, might be a domain
+            return True</code></pre>
+
+            <h3 id="source-normalization">2.3 — Source Normalization</h3>
+            <p><strong>Tasks:</strong></p>
+            <ul>
+                <li>Normalize every result to <code>{title, url, snippet, fetched_at}</code></li>
+            </ul>
+            <p><strong>Acceptance:</strong> Agent can search and fetch with uniform output.</p>
+
+            <h2 id="phase-3-deep-research-capability">Phase 3 — Deep Research Capability (Tool-Level Plan/Execute)</h2>
+
+            <h3 id="capability-structure">3.1 — Capability Structure</h3>
+            <div class="file-tree">
+                <pre><code>capabilities/deep_research/
+├── __init__.py
+├── orchestrator.py          # Main DeepResearchTool
+├── tools.py                 # Research-specific tools
+├── SKILL.md                 # Instructions for LLM
+└── mcp.json                 # MCP server configs (optional)</code></pre>
+            </div>
+
+            <h3 id="main-tool-deepresearchtool">3.2 — Main Tool: DeepResearchTool</h3>
+            <p><strong>File:</strong> <code>capabilities/deep_research/orchestrator.py</code></p>
+            <pre><code>"""Deep research capability — tool-level plan/execute orchestration."""
+
+from __future__ import annotations
+import tempfile
+import shutil
+from pathlib import Path
+from typing import Any
+
+from tool_base import AgentContext, AgentTool, ToolResult
+from capabilities.shared.todo_structures import TodoList
+from capabilities.shared.guardrails import ExecutionLimits, CompletionVerifier
+from capabilities.deep_research.tools import RESEARCH_TOOLS
+
+class DeepResearchTool(AgentTool):
+    """Conduct deep, multi-source research with cited findings.
+
+    Use this for queries that require:
+    - Multiple sources (papers, news, docs, academic)
+    - Verification and cross-referencing
+    - Comprehensive coverage of a topic
+    - Citations for every claim
+
+    NOT for:
+    - Quick fact lookups
+    - Simple questions
+    - Current-time queries
+
+    The tool will:
+    1. Create a research plan with todos
+    2. Search and fetch relevant sources
+    3. Extract findings with citations
+    4. Synthesize into a cited report
+
+    Args:
+        query: The research question or topic
+        breadth: Number of sub-questions to explore (default: 5)
+        depth: How deeply to investigate each (default: 2)
+        max_duration: Maximum time to spend (default: 300 seconds)
+    """
+    query: str
+    breadth: int = 5
+    depth: int = 2
+    max_duration: int = 300
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        # Create research-specific context
+        research_context = AgentContext(
+            cron_service=getattr(context, 'cron_service', None),
+            todo_list=TodoList(),  # Empty todo list to start
+            workspace=self._create_workspace()
+        )
+
+        # Set up execution limits
+        limits = ExecutionLimits(
+            max_iterations=50,
+            max_duration_seconds=self.max_duration,
+            max_tool_calls=100
+        )
+
+        try:
+            # Run research subagent with guardrails
+            report = await self._run_research_agent(
+                query=self.query,
+                context=research_context,
+                limits=limits
+            )
+
+            return self.tool_result(result={
+                "report": report,
+                "workspace": research_context.workspace
+            })
+
+        finally:
+            # Cleanup workspace
+            self._cleanup_workspace(research_context.workspace)
+
+    def _create_workspace(self) -> str:
+        """Create a temporary workspace for findings."""
+        workspace = tempfile.mkdtemp(prefix="research_")
+        Path(workspace).mkdir(parents=True, exist_ok=True)
+        return workspace
+
+    def _cleanup_workspace(self, workspace: str):
+        """Clean up the workspace directory."""
+        try:
+            shutil.rmtree(workspace)
+        except Exception:
+            pass  # Best-effort cleanup
+
+    async def _run_research_agent(
+        self,
+        query: str,
+        context: AgentContext,
+        limits: ExecutionLimits
+    ) -> str:
+        """Run the research subagent with guardrails."""
+        from agent import AgentRuntime
+        from session import SessionManager
+
+        # Create in-memory session
+        sm = SessionManager.in_memory("claude-sonnet-4-20250514")
+
+        # Create child runtime with research tools only
+        research_agent = AgentRuntime(
+            context=context,
+            session_manager=sm,
+            model_name="claude-sonnet-4-20250514",
+            tools_override=RESEARCH_TOOLS  # No spawn capability
+        )
+
+        try:
+            await research_agent.initialize()
+
+            # Load skill instructions
+            skill_instructions = self._load_skill_instructions()
+
+            # Main execution loop with guardrails
+            while True:
+                # Check limits
+                should_continue, reason = limits.should_continue()
+                if not should_continue:
+                    return self._generate_partial_report(context, reason)
+
+                # Run one LLM turn
+                has_more = await research_agent.run(
+                    user_text=query if limits.iteration == 1 else None,
+                    sys_prompt=skill_instructions if limits.iteration == 1 else None
+                )
+
+                if not has_more:
+                    break
+
+        finally:
+            await sm.close()
+
+        # Post-execution verification (hard guardrail)
+        is_complete, pending = CompletionVerifier.verify(context, "todo_list")
+
+        if not is_complete:
+            # LLM claimed done but todos remain
+            warning = CompletionVerifier.generate_warning(pending)
+            await self._inject_completion_warning(sm, context, warning)
+
+            has_more = await research_agent.run(
+                user_text=None,
+                sys_prompt=None
+            )
+
+            if not has_more:
+                return self._generate_report_with_gaps(context, pending)
+
+        # Generate final report
+        return await self._generate_final_report(context)
+
+    def _load_skill_instructions(self) -> str:
+        """Load research skill instructions."""
+        try:
+            skill_file = Path(__file__).parent / "SKILL.md"
+            with open(skill_file, "r", encoding="utf-8") as f:
+                return f.read()
+        except Exception:
+            return self._default_instructions()</code></pre>
+
+            <h3 id="research-skill-instructions">3.3 — Research Skill Instructions</h3>
+            <p><strong>File:</strong> <code>capabilities/deep_research/SKILL.md</code></p>
+            <pre><code>---
+name: deep-research
+description: Deep, multi-source research with verification and cited reports
+---
+
+# Deep Research
+
+You are a research agent specializing in comprehensive, multi-source investigation.
+
+## Planning Phase
+
+When you receive a research query:
+1. **Decompose** into 3-7 specific sub-questions
+2. **Identify** the types of sources needed for each
+3. **Add a todo** for each sub-question using `AddTodoTool`
+4. **Create** a synthesis outline as your final todo
+
+## Execution Phase
+
+For each todo:
+1. **Search** using `WebSearchTool` with specific, targeted queries
+2. **Review** results and select 2-5 most promising sources
+3. **Fetch** each promising source using `FetchUrlTool`
+4. **Extract** key claims with exact citations
+5. **Write** findings to workspace using `WriteTool`
+6. **Complete** the todo using `CompleteTodoTool`
+
+**Adaptability:**
+- If you discover gaps, add new todos with `AddTodoTool`
+- If a todo yields no results after reasonable effort, use `AbandonTodoTool` with reason
+- If a todo's scope needs adjustment, use `ModifyTodoTool`
+
+## Completion Requirements
+
+Before generating your final report:
+1. **Call** `ListTodosTool` to review all todos
+2. **Call** `VerifyTodosCompleteTool` to verify completion
+3. **Only proceed** when verification succeeds
+
+Your research is incomplete if you exit with pending todos.
+
+## Synthesis Phase
+
+When all todos are verified complete:
+1. **Read** all findings files from workspace
+2. **Organize** findings by theme, not by source
+3. **Write** final report using `WriteTool(path="FINAL_REPORT.md", ...)`
+
+**Report structure:**
+- Executive summary (3-5 sentences)
+- Key findings organized by theme
+- Every factual claim cites a URL
+- Conflicts or gaps noted explicitly
+- Sources list at the end
+
+**Citation format:**
+- Inline: `Claim [1]` or `Claim (Source Name)`
+- Sources list: `[1] https://url - Title`</code></pre>
+
+            <h2 id="phase-4-testing-verification">Phase 4 — Testing & Verification</h2>
+
+            <h3 id="unit-tests">4.1 — Unit Tests</h3>
+            <p><strong>File:</strong> <code>tests/shared/test_todo_structures.py</code></p>
+            <pre><code>"""Test shared todo structures."""
+
+import pytest
+from capabilities.shared.todo_structures import TodoList, Todo
+
+def test_add_todo():
+    """Test adding todos."""
+    todo_list = TodoList()
+    todo_id = todo_list.add("First todo")
+    assert todo_id == "1"
+    assert len(todo_list.todos) == 1
+
+def test_complete_todo():
+    """Test completing todos."""
+    todo_list = TodoList()
+    todo_id = todo_list.add("First todo")
+    todo_list.add("Second todo")
+
+    result = todo_list.complete(todo_id)
+    assert result is True
+    assert todo_list.todos[0].status == "completed"
+    assert not todo_list.is_complete()
+
+def test_abandon_todo():
+    """Test abandoning todos."""
+    todo_list = TodoList()
+    todo_id = todo_list.add("Impossible todo")
+
+    result = todo_list.abandon(todo_id, "No relevant information found")
+    assert result is True
+    assert todo_list.todos[0].status == "abandoned"
+    assert todo_list.is_complete()</code></pre>
+
+            <h3 id="integration-tests">4.2 — Integration Tests</h3>
+            <p><strong>File:</strong> <code>tests/integration/test_deep_research.py</code></p>
+            <pre><code>"""Integration tests for deep research capability."""
+
+import pytest
+from capabilities.deep_research.orchestrator import DeepResearchTool
+
+@pytest.mark.asyncio
+async def test_research_creates_todos():
+    """Test that research creates a plan with todos."""
+    tool = DeepResearchTool(
+        query="Test query",
+        breadth=3,
+        max_duration=60
+    )
+
+    # Run with mocked context
+    # Verify todos were created
+
+@pytest.mark.asyncio
+async def test_research_completes_or_abandons_all_todos():
+    """Test that research doesn't leave todos pending."""
+    # Run full research flow
+    # Verify all todos are complete or abandoned at end
+
+@pytest.mark.asyncio
+async def test_verify_tool_enforces_completion():
+    """Test that VerifyTodosCompleteTool fails with pending todos."""
+    # Create context with pending todos
+    # Call VerifyTodosCompleteTool
+    # Verify it returns error
+    # Complete a todo
+    # Call VerifyTodosCompleteTool
+    # Verify it succeeds</code></pre>
+
+            <h3 id="security-tests-critical">4.3 — Security Tests (Critical)</h3>
+            <p><strong>File:</strong> <code>tests/security/test_ssrf.py</code></p>
+            <pre><code>"""SSRF protection tests."""
+
+import pytest
+from capabilities.deep_research.tools import FetchUrlTool
+
+@pytest.mark.asyncio
+async def test_rejects_localhost():
+    """Test that localhost URLs are rejected."""
+    tool = FetchUrlTool(url="http://localhost:8080")
+    result = await tool.execute(context=None)
+    assert result.error is True
+    assert "rejected" in result.result["error"].lower()
+
+@pytest.mark.asyncio
+async def test_rejects_private_ips():
+    """Test that private IP URLs are rejected."""
+    test_urls = [
+        "http://10.0.0.1",
+        "http://192.168.1.1",
+        "http://172.16.0.1",
+        "http://169.254.169.254",  # AWS metadata
+    ]
+
+    for url in test_urls:
+        tool = FetchUrlTool(url=url)
+        result = await tool.execute(context=None)
+        assert result.error is True, f"URL {url} should be rejected"</code></pre>
+
+            <h2 id="phase-5-mcp-configuration">Phase 5 — MCP Configuration</h2>
+
+            <h3 id="mcp-servers-configuration">5.1 — MCP Servers Configuration</h3>
+            <p><strong>File:</strong> <code>capabilities/deep_research/mcp.json</code></p>
+            <pre><code>{
+  "mcpServers": {
+    "web-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      }
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-fetch"]
+    }
+  }
+}</code></pre>
+
+            <h2 id="phase-6-capability-pack-loader">Phase 6 — Capability Pack Loader</h2>
+
+            <h3 id="pack-discovery">6.1 — Pack Discovery</h3>
+            <p><strong>File:</strong> <code>capabilities/loader.py</code> (new kernel module)</p>
+            <pre><code>"""Capability pack loader. Kernel-agnostic discovery and loading."""
+
+from pathlib import Path
+import importlib.util
+import json
+from typing import Dict, Any
+
+class CapabilityLoader:
+    """Discover and load capability packs."""
+
+    def __init__(self, capabilities_dir: str | Path):
+        self.capabilities_dir = Path(capabilities_dir)
+        self.loaded_capabilities: Dict[str, Any] = {}
+
+    def discover(self) -> Dict[str, Path]:
+        """Find all capability packs."""
+        capabilities = {}
+
+        if not self.capabilities_dir.exists():
+            return capabilities
+
+        for capability_dir in self.capabilities_dir.iterdir():
+            if capability_dir.is_dir() and not capability_dir.name.startswith("_"):
+                init_file = capability_dir / "__init__.py"
+                if init_file.exists():
+                    capabilities[capability_dir.name] = capability_dir
+
+        return capabilities
+
+    def load_capability(self, name: str, runtime):
+        """Load a single capability pack."""
+        if name in self.loaded_capabilities:
+            return self.loaded_capabilities[name]
+
+        capability_path = self.capabilities_dir / name
+        init_file = capability_path / "__init__.py"
+
+        if not init_file.exists():
+            raise ValueError(f"Capability {name} has no __init__.py")
+
+        # Load the module
+        spec = importlib.util.spec_from_file_location(
+            f"capabilities.{name}",
+            init_file
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        # Register with runtime
+        if hasattr(module, 'register'):
+            module.register(runtime)
+            self.loaded_capabilities[name] = module
+
+        return module</code></pre>
+
+            <h2 id="phase-7-documentation">Phase 7 — Documentation</h2>
+
+            <h3 id="architecture-documentation">7.1 — Architecture Documentation</h3>
+            <p><strong>File:</strong> <code>docs/architecture/capability_system.md</code></p>
+            <pre><code># Capability System Architecture
+
+## Overview
+Capabilities are plug-in modules that extend the agent's functionality
+without kernel changes.
+
+## Structure
+capabilities/
+├── shared/              # Reusable components
+├── deep_research/       # Example capability
+└── coding/              # Future capability
+
+## Design Principles
+
+- **Kernel-agnostic**: Capabilities don't require kernel changes
+- **Tool-based logic**: All behavior via tools, not kernel policies
+- **Composable**: Shared components reused across capabilities</code></pre>
+
+            <h2 id="phase-8-rollout-plan">Phase 8 — Rollout Plan</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Phase</th>
+                        <th>Duration</th>
+                        <th>Deliverables</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Foundation</td>
+                        <td>Week 1</td>
+                        <td>Shared components, unit tests</td>
+                    </tr>
+                    <tr>
+                        <td>Research Capability</td>
+                        <td>Week 2</td>
+                        <td>DeepResearchTool, integration tests</td>
+                    </tr>
+                    <tr>
+                        <td>Kernel Integration</td>
+                        <td>Week 2</td>
+                        <td>Capability loader, MCP integration</td>
+                    </tr>
+                    <tr>
+                        <td>Testing & Hardening</td>
+                        <td>Week 3</td>
+                        <td>Security tests, benchmarks</td>
+                    </tr>
+                    <tr>
+                        <td>Documentation & Rollout</td>
+                        <td>Week 4</td>
+                        <td>Complete documentation, monitoring</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2 id="definition-of-done">Definition of Done</h2>
+
+            <ul class="checklist">
+                <li>Kernel changes limited to Phase 0 (capability-agnostic)</li>
+                <li>No <code>PlanExecutePolicy</code> in kernel</li>
+                <li>Plan/execute/todos at tool level only</li>
+                <li>Shared todo components reused across capabilities</li>
+                <li>SSRF protection implemented</li>
+                <li>Guardrails (VerifyTodosCompleteTool, limits, verification)</li>
+                <li>Shell tool excluded from research runtime</li>
+                <li>MCP integration for search/fetch</li>
+                <li>Full test coverage (unit, integration, security)</li>
+                <li>Documentation complete</li>
+                <li>Evaluation benchmarks established</li>
+            </ul>
+
+            <h2 id="differences-from-v1-plan">Differences from v1 Plan</h2>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>Aspect</th>
+                        <th>v1 Plan</th>
+                        <th>v2 Plan (This)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Plan/execute location</td>
+                        <td>Kernel (PlanExecutePolicy)</td>
+                        <td>Tool level (LLM autonomous)</td>
+                    </tr>
+                    <tr>
+                        <td>Todo enforcement</td>
+                        <td>on_idle gate</td>
+                        <td>VerifyTodosCompleteTool + post-validation</td>
+                    </tr>
+                    <tr>
+                        <td>Kernel knowledge of todos</td>
+                        <td>Yes (policy)</td>
+                        <td>No (tool context only)</td>
+                    </tr>
+                    <tr>
+                        <td>Shared components</td>
+                        <td>None</td>
+                        <td>capabilities/shared/ module</td>
+                    </tr>
+                    <tr>
+                        <td>Guardrails</td>
+                        <td>Basic</td>
+                        <td>Layered (tool + post + limits)</td>
+                    </tr>
+                    <tr>
+                        <td>Escape mechanism</td>
+                        <td>None</td>
+                        <td>AbandonTodoTool</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h2 id="future-extensions">Future Extensions</h2>
+
+            <div class="new">
+                <h3>Coding Capability (Example)</h3>
+                <p>Using the same shared components:</p>
+                <pre><code># capabilities/coding/orchestrator.py
+from capabilities.shared.todo_tools import TODO_TOOLS
+
+class CodingTool(AgentTool):
+    task: str
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        context.todo_list = TodoList()
+
+        coding_tools = TODO_TOOLS + [
+            ReadTool,
+            WriteTool,
+            EditTool,
+            TestTool,
+        ]
+
+        # Same pattern as DeepResearchTool</code></pre>
+            </div>
+
+            <div class="info-box" style="margin-top: 50px;">
+                <p><strong>End of Implementation Plan v2</strong></p>
+                <p>This plan prioritizes simplicity, LLM autonomy, and tool-level orchestration over kernel complexity. All plan/execute behaviors emerge from tool definitions and instructions rather than explicit state machines.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
