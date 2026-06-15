@@ -58,10 +58,17 @@ HookAnyType: TypeAlias = ModelResponseHook | ToolResultHook
 
 class AgentRuntime:
     """Minimal runtime that exposes registered tools for the model."""
-    def __init__(self, context: AgentContext, session_manager: SessionManager, model_name: str, tools_override: list[Type[AgentTool]] | None = None):
+    def __init__(self, context: AgentContext, session_manager: SessionManager, model_name: str, tools_override: list[Type[AgentTool]] | None = None, max_tool_calls_per_turn: int = 10):
         self.model_name = model_name
         self.session_manager = session_manager
-        self.max_tool_calls_per_turn = 10
+        # Phase 0.3: per-turn anti-runaway guardrail, now configurable per runtime.
+        # The main agent keeps the conservative default (10) — after this many
+        # tool rounds since the last user message it stops and asks the user. A
+        # spawned generator/worker CANNOT ask a user, so the PGE engine (Phase 1)
+        # constructs those runtimes with a high cap (e.g. 200) so a long fan-out +
+        # synthesis run is never force-stopped mid-turn. This is only the per-turn
+        # brake; RunBudget (Phase 0.6) remains the total ceiling for a whole run.
+        self.max_tool_calls_per_turn = max_tool_calls_per_turn
         self.context = context
         self._sys_prompt: str | None = None
         self.thinking_mode: Literal["off", "on", "stream"] = "off"

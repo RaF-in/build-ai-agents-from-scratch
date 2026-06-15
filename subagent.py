@@ -81,6 +81,18 @@ class SubagentRegistry:
         self.active: dict[str, RunInfo] = {}
         self.history: list[RunInfo] = []
 
+    def register(self, task: str) -> RunInfo:
+        """Allocate a tracked run slot WITHOUT enforcing the global cap.
+
+        Used by run-scoped spawns (the PGE engine / delegate tool) whose
+        concurrency is bounded by a per-run semaphore (Phase 0.4) instead of the
+        global MAX_CONCURRENT_SUBAGENTS cap. Still recorded in active/history so
+        observability is unaffected. Synchronous (no ``await`` before the insert).
+        """
+        run = RunInfo(id=uuid.uuid4().hex[:8], task=task)
+        self.active[run.id] = run
+        return run
+
     def try_acquire(self, task: str) -> RunInfo | None:
         """Concurrency cap check. Returns a RunInfo slot, or None if full.
 
@@ -89,9 +101,7 @@ class SubagentRegistry:
         """
         if len(self.active) >= self.max_concurrent:
             return None
-        run = RunInfo(id=uuid.uuid4().hex[:8], task=task)
-        self.active[run.id] = run
-        return run
+        return self.register(task)
 
     def complete(self, run: RunInfo, *, status: RunStatus, result: str) -> None:
         run.status = status
