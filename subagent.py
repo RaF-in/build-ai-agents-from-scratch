@@ -29,14 +29,35 @@ RETRY_ON_TIMEOUT = False   # timeouts fail fast by default
 
 RunStatus = Literal["running", "completed", "failed", "expired", "rejected"]
 
-CHILD_SYSTEM_PROMPT = (
-    "You are a subagent: a focused worker spawned to complete ONE specific task. "
-    "You have only file and shell tools (read, write, edit, bash). "
-    "You cannot spawn further subagents. Work the task to completion, then end your "
-    "turn with a concise plain-text summary of what you found or did — that summary "
-    "is the ONLY thing returned to the agent that spawned you, so make it self-contained. "
-    "Do not ask questions; you cannot receive a reply. Always use absolute paths."
-)
+def child_system_prompt(*, can_spawn: bool) -> str:
+    """The subagent system prompt, matched to the child's actual tool set.
+
+    A child still inside the depth budget receives SpawnSubagentTool (see
+    ``child_tools``); telling it "you cannot spawn" would contradict the tool it
+    holds. A child at max_depth is a leaf and is told so.
+    """
+    if can_spawn:
+        capability = (
+            "You have file and shell tools (read, write, edit, bash) and a spawn "
+            "tool to delegate well-scoped sub-tasks to your own workers. Delegate "
+            "when work splits into independent pieces; otherwise do it yourself."
+        )
+    else:
+        capability = (
+            "You have only file and shell tools (read, write, edit, bash). "
+            "You cannot spawn further subagents."
+        )
+    return (
+        "You are a subagent: a focused worker spawned to complete ONE specific task. "
+        f"{capability} Work the task to completion, then end your "
+        "turn with a concise plain-text summary of what you found or did — that summary "
+        "is the ONLY thing returned to the agent that spawned you, so make it self-contained. "
+        "Do not ask questions; you cannot receive a reply. Always use absolute paths."
+    )
+
+
+# Backward-compatible default: the leaf-worker prompt (no spawn).
+CHILD_SYSTEM_PROMPT = child_system_prompt(can_spawn=False)
 
 
 @dataclass

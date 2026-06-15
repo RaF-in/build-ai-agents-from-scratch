@@ -10,20 +10,34 @@ import asyncio
 from tool_base import AgentContext, AgentTool, ToolResult
 from subagent import (
     subagent_registry,
-    SUBAGENT_TIMEOUT_SECONDS, SUBAGENT_MODEL, CHILD_SYSTEM_PROMPT,
+    SUBAGENT_TIMEOUT_SECONDS, SUBAGENT_MODEL, child_system_prompt,
     MAX_RETRIES, RETRY_BASE_DELAY, RETRY_ON_TIMEOUT,
 )
 
 
-def child_tools() -> list[type[AgentTool]]:
-    """The child's entire universe: file/shell tools only.
+def _child_can_spawn(spawner_depth: int, max_depth: int) -> bool:
+    """Whether a child spawned by an agent at ``spawner_depth`` may itself spawn.
 
-    No spawn tool, no cron, no skills => structural depth limit. Resolved
-    lazily so this module never imports agent_tools at load time (agent_tools
-    imports *us*, so a top-level import back would be a circular dependency).
+    The child sits at ``spawner_depth + 1``; it keeps the spawn tool only while
+    that depth is still below ``max_depth`` (so its own children stay in budget).
+    """
+    return spawner_depth + 1 < max_depth
+
+
+def child_tools(spawner_depth: int, max_depth: int) -> list[type[AgentTool]]:
+    """The tool universe handed to a child spawned by an agent at ``spawner_depth``.
+
+    File/shell tools always; SpawnSubagentTool only while the depth budget allows
+    further fan-out. The depth limit is therefore *structural* — a leaf worker
+    literally lacks the tool, so it cannot recurse. Resolved lazily so this module
+    never imports agent_tools at load time (agent_tools imports *us*, so a
+    top-level import back would be a circular dependency).
     """
     from agent_tools import ReadTool, WriteTool, EditTool, BashTool
-    return [ReadTool, WriteTool, EditTool, BashTool]
+    base: list[type[AgentTool]] = [ReadTool, WriteTool, EditTool, BashTool]
+    if _child_can_spawn(spawner_depth, max_depth):
+        base.append(SpawnSubagentTool)
+    return base
 
 
 class SpawnSubagentTool(AgentTool):
@@ -41,6 +55,18 @@ class SpawnSubagentTool(AgentTool):
     task: str
 
     async def execute(self, context: AgentContext) -> ToolResult:
+        # --- Constraint 1: depth budget (structural; this is the safety net) ---
+        # child_tools() already withholds this tool past the budget, so normally
+        # we never reach here too deep. Guard anyway against a misconfigured runtime.
+        if context.depth + 1 > context.max_depth:
+            return self.tool_result(error=True, result={
+                "error": (
+                    f"Cannot spawn: depth budget reached "
+                    f"(depth={context.depth}, max_depth={context.max_depth}). "
+                    "Do the work yourself."
+                )
+            })
+
         # --- Constraint 2: concurrency cap (one slot for the whole run) ---
         run = subagent_registry.try_acquire(self.task)
         if run is None:
@@ -93,16 +119,25 @@ class SpawnSubagentTool(AgentTool):
         from agent import AgentRuntime
         from session import SessionManager
 
+        # Fork a depth+1 context (fresh object) so this child — and any siblings
+        # spawned concurrently — each track their own depth correctly.
+        child_ctx = context.child_context()
+        can_spawn = _child_can_spawn(context.depth, context.max_depth)
+
         sm = SessionManager.in_memory(SUBAGENT_MODEL)
         child = AgentRuntime(
-            context=context,                 # shares cron/telegram services, harmless
+            context=child_ctx,                # depth+1; cron/telegram services shared
             session_manager=sm,
             model_name=SUBAGENT_MODEL,
-            tools_override=child_tools(),     # <-- structural depth limit
+            # Tools scoped by the *spawner's* depth: spawn tool only while in budget.
+            tools_override=child_tools(context.depth, context.max_depth),
         )
         try:
             await child.initialize()          # no replay_handler => silent worker
-            has_more = await child.run(user_text=self.task, sys_prompt=CHILD_SYSTEM_PROMPT)
+            has_more = await child.run(
+                user_text=self.task,
+                sys_prompt=child_system_prompt(can_spawn=can_spawn),
+            )
             while has_more:
                 has_more = await child.run(user_text=None, sys_prompt=None)
             return await self._final_summary(sm)

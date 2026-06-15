@@ -13,10 +13,23 @@ from pydantic import BaseModel
 
 
 class AgentContext:
-    def __init__(self, *, chat_id: int | None = None, telegram_client: Any = None, cron_service: Any = None):
+    def __init__(
+        self,
+        *,
+        chat_id: int | None = None,
+        telegram_client: Any = None,
+        cron_service: Any = None,
+        depth: int = 0,
+        max_depth: int = 2,
+    ):
         self.telegram_client = telegram_client
         self.chat_id = chat_id
         self.cron_service = cron_service
+        # Depth budget (Phase 0.1): how deep the agent tree may grow.
+        # 0 = main agent; each spawn increments depth by one. With max_depth=2
+        # the tree is main(0) -> generator(1) -> worker(2); the worker is a leaf.
+        self.depth = depth
+        self.max_depth = max_depth
 
     async def send_message(self, text: str) -> None:
         if not self.telegram_client or not self.chat_id:
@@ -25,6 +38,20 @@ class AgentContext:
         if not payload:
             return
         await self.telegram_client.send_message(chat_id=self.chat_id, text=payload)
+
+    def child_context(self) -> "AgentContext":
+        """Fork a context for a spawned child: same services, depth + 1.
+
+        Returns a *fresh* object rather than mutating ``self`` so concurrent
+        sibling spawns can never clobber each other's depth.
+        """
+        return AgentContext(
+            chat_id=self.chat_id,
+            telegram_client=self.telegram_client,
+            cron_service=self.cron_service,
+            depth=self.depth + 1,
+            max_depth=self.max_depth,
+        )
 
 
 class ToolResult(BaseModel):
