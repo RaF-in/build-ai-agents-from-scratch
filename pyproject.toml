@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "aiosqlite>=0.22.1",
     "asyncio>=4.0.0",
+    "ddgs>=9.14.4",
     "fastapi>=0.136.1",
     "groq>=1.2.0",
     "huggingface-hub>=1.15.0",

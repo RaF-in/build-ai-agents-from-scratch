@@ -41,8 +41,8 @@ async def spawn_role(
     Reuses ``run_subagent`` (depth/concurrency/timeout/retry from Phase 0). The
     role runs at ``context.depth + 1``; from a depth-0 pipeline context that puts
     the generator at depth 1, so it can still fan out to depth-2 workers via its
-    DelegateTasksTool. Concurrency is governed by the per-run semaphore, never the
-    global cap (use_global_cap=False).
+    delegate tool (e.g. DelegateWebSearchTool). Concurrency is governed by the
+    per-run semaphore, never the global cap (use_global_cap=False).
     """
     sys_prompt = role.system_prompt
     if context.workspace_dir:

@@ -210,6 +210,63 @@ async def _final_summary(sm) -> str:
     return "(subagent finished without producing a text summary)"
 
 
+async def delegate_to_workers(
+    context: AgentContext,
+    tasks: list[str],
+    *,
+    worker_tools: list[type[AgentTool]],
+    worker_prompt: str,
+    result_name: str,
+    timeout_s: float = SUBAGENT_TIMEOUT_SECONDS,
+    task_key: str = "task",
+) -> list[dict]:
+    """Fan out one worker per task, concurrently, bounded by the PER-RUN semaphore.
+
+    This is the ONE generic fan-out mechanism (Phase 0.5). It is capability-blind:
+    callers supply the worker tool set and prompt, so the research web-search
+    delegate (web.tools.DelegateWebSearchTool) and any future capability's delegate
+    wrapper all share this single implementation. Concurrency is confined here
+    (the kernel's
+    tool-dispatch loop stays sequential), and bounded by ``context.run_semaphore``
+    — NOT the global cap — so a breadth-N run actually fans out N-wide. Per-task
+    failures are isolated: one worker failing still returns every other worker's
+    result, in input order.
+
+    Returns a list of ``{<task_key>, ok, summary, error}`` dicts. Raises
+    ``ValueError`` when there is no per-run semaphore (the caller converts that to
+    a clean tool error), since this tool only makes sense inside a pipeline run.
+    """
+    sem = context.run_semaphore
+    if sem is None:
+        raise ValueError(
+            "requires a per-run semaphore (must be spawned inside a pipeline run)"
+        )
+
+    async def one(task: str) -> dict:
+        try:
+            async with sem:                      # per-run budget, NOT the global cap
+                res = await run_subagent(
+                    task=task,
+                    context=context,             # run_subagent forks depth+1 internally
+                    tools_override=worker_tools,
+                    sys_prompt=worker_prompt,
+                    timeout_s=timeout_s,         # workers keep the short leash
+                    use_global_cap=False,        # semaphore governs concurrency
+                    result_name=result_name,
+                )
+            if res.error:
+                return {task_key: task, "ok": False, "summary": None,
+                        "error": res.result.get("error", "unknown error")}
+            return {task_key: task, "ok": True,
+                    "summary": res.result.get("content", ""), "error": None}
+        except Exception as exc:
+            # Isolate: one worker's failure must not sink the rest of the batch.
+            return {task_key: task, "ok": False, "summary": None, "error": str(exc)}
+
+    # gather preserves order; each `one` already returns a result (never raises).
+    return await asyncio.gather(*[one(t) for t in tasks])
+
+
 class SpawnSubagentTool(AgentTool):
     """Delegate a focused, self-contained task to a child agent.
 
@@ -239,69 +296,8 @@ class SpawnSubagentTool(AgentTool):
         )
 
 
-class DelegateTasksTool(AgentTool):
-    """Run several independent sub-tasks in parallel — one worker per task.
-
-    This is the ONE place fan-out concurrency is allowed to live (Phase 0.5).
-    The kernel's tool-dispatch loop stays strictly sequential, so ordinary
-    single-turn tool use elsewhere (e.g. Write then Read in another capability)
-    can never race. Concurrency is confined here and bounded by the per-run
-    semaphore (Phase 0.4) — NOT the global concurrency cap — so a breadth-N run
-    actually fans out N-wide. Per-task failures are isolated: one worker failing
-    still returns every other worker's result.
-
-    Only meaningful inside a pipeline run (one that set up a per-run semaphore);
-    it is given to the generator role, never to the main agent.
-
-    Args:
-        tasks: Independent, self-contained instructions. Each becomes one worker;
-               include every detail it needs (the worker sees nothing else).
-    """
-    tasks: list[str]
-
-    async def execute(self, context: AgentContext) -> ToolResult:
-        if not self.tasks:
-            return self.tool_result(error=True, result={"error": "No tasks to delegate."})
-
-        sem = context.run_semaphore
-        if sem is None:
-            # This tool belongs to run-scoped agents. Without a per-run budget,
-            # refuse rather than silently fall back to the global cap (which would
-            # throttle the fan-out to 3). Surfaces a wiring bug loudly.
-            return self.tool_result(error=True, result={
-                "error": "DelegateTasksTool requires a per-run semaphore "
-                         "(must be spawned inside a pipeline run)."
-            })
-
-        # Worker scoping is computed once from THIS agent's (the spawner's) depth.
-        # Workers run at depth+1; with the default budget they are leaf workers.
-        worker_tools = child_tools(context.depth, context.max_depth)
-        worker_prompt = child_system_prompt(
-            can_spawn=_child_can_spawn(context.depth, context.max_depth)
-        )
-
-        async def one(task: str) -> dict:
-            try:
-                async with sem:                      # per-run budget, NOT the global cap
-                    res = await run_subagent(
-                        task=task,
-                        context=context,
-                        tools_override=worker_tools,
-                        sys_prompt=worker_prompt,
-                        timeout_s=SUBAGENT_TIMEOUT_SECONDS,   # workers keep the short leash
-                        use_global_cap=False,                  # semaphore governs concurrency
-                        result_name=self.tool_name(),
-                    )
-                if res.error:
-                    return {"task": task, "ok": False, "summary": None,
-                            "error": res.result.get("error", "unknown error")}
-                return {"task": task, "ok": True,
-                        "summary": res.result.get("content", ""), "error": None}
-            except Exception as e:
-                # Isolate: one worker's failure must not sink the rest of the batch.
-                return {"task": task, "ok": False, "summary": None, "error": str(e)}
-
-        # gather preserves order; each `one` already returns a result (never raises),
-        # so a single failure yields a per-task error entry, not a dead batch.
-        summaries = await asyncio.gather(*[one(t) for t in self.tasks])
-        return self.tool_result(result={"summaries": summaries})
+# NOTE: there is intentionally no generic "DelegateTasksTool" AgentTool. Parallel
+# fan-out is provided by the reusable ``delegate_to_workers`` helper above; each
+# capability that needs it ships a thin wrapper that pins its own worker tool set
+# and prompt (e.g. web.tools.DelegateWebSearchTool scopes workers to search/fetch).
+# A file/bash-worker wrapper would be added the same way when a capability needs one.

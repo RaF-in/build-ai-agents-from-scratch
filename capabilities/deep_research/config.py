@@ -31,9 +31,10 @@ def _criteria_block() -> str:
 
 
 def build_research_config() -> CapabilityConfig:
-    # Imported here (not at module top) so discovery never pulls these in.
+    # Imported here (not at module top) so discovery never pulls these in. Search
+    # reach is the GENERIC web layer — this config only references it.
     from agent_tools import ReadTool, WriteTool, EditTool
-    from subagent_tools import DelegateTasksTool
+    from web.tools import DelegateWebSearchTool
 
     criteria = _criteria_block()
 
@@ -47,9 +48,10 @@ def build_research_config() -> CapabilityConfig:
         name="generator",
         # Same criteria injected here AND into the evaluator — steers before feedback.
         system_prompt=_prompt("generator.md").replace("{{CRITERIA}}", criteria),
-        # Domain search tools (SearchTool/FetchTool) are added in Phase 3; for now the
-        # generator plans, delegates, and writes with the shared file/todo tools.
-        tools=[*TODO_TOOLS, DelegateTasksTool, ReadTool, WriteTool, EditTool],
+        # The generator plans + synthesizes; it fans out actual web search/fetch to
+        # workers via DelegateWebSearchTool (Phase 3.3) so only compressed worker
+        # summaries — never raw untrusted page content — enter its context.
+        tools=[*TODO_TOOLS, DelegateWebSearchTool, ReadTool, WriteTool, EditTool],
         policy_factory=PlanExecutePolicy,
         fresh_todo_list=True,
     )
