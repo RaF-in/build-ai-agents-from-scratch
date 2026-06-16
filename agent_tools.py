@@ -134,5 +134,15 @@ from subagent_tools import SpawnSubagentTool
 
 TOOLS = [ReadTool, WriteTool, BashTool, EditTool, CronAddTool, CronListTool, CronRemoveTool, SkillCreateTool, SkillListTool, SkillDeleteTool, SkillInvokeTool, SpawnSubagentTool]
 
+# Capability packs (Phase 2): discover capabilities/<name>/ and surface ONLY each
+# pack's thin entry tool here, so the model can select a capability with no kernel
+# edit. Progressive disclosure — the entry tool carries just a 1-line description;
+# the heavy role prompts/tools stay scoped inside the pipeline run. This block re-runs
+# on every hot-reload of agent_tools, and discover() rebuilds from scratch, so the
+# list never accumulates duplicates.
+from capabilities.shared.registry import capability_registry
+capability_registry.discover()
+TOOLS = TOOLS + capability_registry.entry_tools()
+
 
         

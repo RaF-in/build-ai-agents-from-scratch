@@ -162,6 +162,23 @@ class AgentContext:
             todo_list=self.todo_list,
         )
 
+    def new_run_context(self) -> "AgentContext":
+        """A fresh depth-0 context for a capability run (Phase 2 entry tools).
+
+        Copies shared services (telegram/cron/identity) but RESETS depth and leaves
+        every run-scoped field — workspace, budget, semaphore, todos, policy —
+        unset, so ``run_pipeline`` can populate them WITHOUT mutating the caller's
+        live context. The main agent therefore never inherits a research run's
+        budget or workspace. Depth-0 keeps the role/worker fan-out math correct
+        (generator at depth 1, workers at depth 2 under the default max_depth=2).
+        """
+        return AgentContext(
+            chat_id=self.chat_id,
+            telegram_client=self.telegram_client,
+            cron_service=self.cron_service,
+            max_depth=self.max_depth,
+        )
+
 
 class ToolResult(BaseModel):
     error: bool = False
