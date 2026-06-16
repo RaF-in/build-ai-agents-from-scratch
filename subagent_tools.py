@@ -51,6 +51,8 @@ async def run_subagent(
     max_tool_calls_per_turn: int = 10,
     use_global_cap: bool = True,
     result_name: str = "SpawnSubagentTool",
+    policy: object | None = None,
+    todo_list: object | None = None,
 ) -> ToolResult:
     """Spawn one child agent with retry/backoff, a PER-SPAWN timeout, and
     depth/concurrency safety. The single low-level spawn primitive shared by the
@@ -66,6 +68,13 @@ async def run_subagent(
         (legacy / main-agent ad-hoc spawns). False tracks history only via
         ``registry.register()`` so a per-run, semaphore-bounded fan-out is not
         throttled to the global cap of 3.
+
+    Phase 1 (PGE) knobs — per-ROLE context overrides applied to the forked child:
+      * ``policy`` — a RunPolicy for the child (e.g. the generator's
+        PlanExecutePolicy). ``child_context`` deliberately does NOT inherit the
+        parent's policy (Phase 0.7), so a role's policy is injected here instead.
+      * ``todo_list`` — a fresh TodoList for the child (the generator plans into
+        it; its completion gate reads it). None leaves the inherited value.
     """
     # --- Constraint 1: depth budget (structural; this is the safety net) ---
     # child_tools() already withholds the spawn tool past the budget, so normally
@@ -108,6 +117,8 @@ async def run_subagent(
                         sys_prompt=sys_prompt,
                         model_name=model_name,
                         max_tool_calls_per_turn=max_tool_calls_per_turn,
+                        policy=policy,
+                        todo_list=todo_list,
                     ),
                     timeout=timeout_s,
                 )
@@ -147,6 +158,8 @@ async def _run_child(
     sys_prompt: str,
     model_name: str,
     max_tool_calls_per_turn: int,
+    policy: object | None = None,
+    todo_list: object | None = None,
 ) -> str:
     # Deferred import breaks the import cycle.
     from agent import AgentRuntime
@@ -156,6 +169,13 @@ async def _run_child(
     # spawned concurrently — each track their own depth (and share the run's
     # workspace/semaphore) correctly.
     child_ctx = context.child_context()
+    # Per-role overrides (Phase 1). policy is never inherited (Phase 0.7), so a
+    # role that needs one (the generator) injects it here; a fresh todo_list is
+    # likewise scoped to this child rather than shared from the parent.
+    if policy is not None:
+        child_ctx.policy = policy
+    if todo_list is not None:
+        child_ctx.todo_list = todo_list
 
     sm = SessionManager.in_memory(model_name)
     child = AgentRuntime(
@@ -217,3 +237,71 @@ class SpawnSubagentTool(AgentTool):
             sys_prompt=child_system_prompt(can_spawn=can_spawn),
             result_name=self.tool_name(),
         )
+
+
+class DelegateTasksTool(AgentTool):
+    """Run several independent sub-tasks in parallel — one worker per task.
+
+    This is the ONE place fan-out concurrency is allowed to live (Phase 0.5).
+    The kernel's tool-dispatch loop stays strictly sequential, so ordinary
+    single-turn tool use elsewhere (e.g. Write then Read in another capability)
+    can never race. Concurrency is confined here and bounded by the per-run
+    semaphore (Phase 0.4) — NOT the global concurrency cap — so a breadth-N run
+    actually fans out N-wide. Per-task failures are isolated: one worker failing
+    still returns every other worker's result.
+
+    Only meaningful inside a pipeline run (one that set up a per-run semaphore);
+    it is given to the generator role, never to the main agent.
+
+    Args:
+        tasks: Independent, self-contained instructions. Each becomes one worker;
+               include every detail it needs (the worker sees nothing else).
+    """
+    tasks: list[str]
+
+    async def execute(self, context: AgentContext) -> ToolResult:
+        if not self.tasks:
+            return self.tool_result(error=True, result={"error": "No tasks to delegate."})
+
+        sem = context.run_semaphore
+        if sem is None:
+            # This tool belongs to run-scoped agents. Without a per-run budget,
+            # refuse rather than silently fall back to the global cap (which would
+            # throttle the fan-out to 3). Surfaces a wiring bug loudly.
+            return self.tool_result(error=True, result={
+                "error": "DelegateTasksTool requires a per-run semaphore "
+                         "(must be spawned inside a pipeline run)."
+            })
+
+        # Worker scoping is computed once from THIS agent's (the spawner's) depth.
+        # Workers run at depth+1; with the default budget they are leaf workers.
+        worker_tools = child_tools(context.depth, context.max_depth)
+        worker_prompt = child_system_prompt(
+            can_spawn=_child_can_spawn(context.depth, context.max_depth)
+        )
+
+        async def one(task: str) -> dict:
+            try:
+                async with sem:                      # per-run budget, NOT the global cap
+                    res = await run_subagent(
+                        task=task,
+                        context=context,
+                        tools_override=worker_tools,
+                        sys_prompt=worker_prompt,
+                        timeout_s=SUBAGENT_TIMEOUT_SECONDS,   # workers keep the short leash
+                        use_global_cap=False,                  # semaphore governs concurrency
+                        result_name=self.tool_name(),
+                    )
+                if res.error:
+                    return {"task": task, "ok": False, "summary": None,
+                            "error": res.result.get("error", "unknown error")}
+                return {"task": task, "ok": True,
+                        "summary": res.result.get("content", ""), "error": None}
+            except Exception as e:
+                # Isolate: one worker's failure must not sink the rest of the batch.
+                return {"task": task, "ok": False, "summary": None, "error": str(e)}
+
+        # gather preserves order; each `one` already returns a result (never raises),
+        # so a single failure yields a per-task error entry, not a dead batch.
+        summaries = await asyncio.gather(*[one(t) for t in self.tasks])
+        return self.tool_result(result={"summaries": summaries})

@@ -20,7 +20,7 @@ import asyncio
 import json
 # import os
 from dotenv import load_dotenv
-from tool_base import AgentContext, AgentTool, ToolResult
+from tool_base import AgentContext, AgentTool, ToolResult, RunPolicy, DEFAULT_POLICY
 import importlib
 from pathlib import Path
 from rich import print
@@ -39,6 +39,13 @@ TOOL_CALL_GUARDRAIL_INSTRUCTION = (
     "Stop calling tools and summarise what you have done so far. "
     "Ask the user for clarification before proceeding."
 )
+
+# Loop safety for the Phase 0.7 completion gate: a non-default policy may keep
+# the run looping on_idle (e.g. while todos remain). This bounds how many times
+# in a row on_idle can re-loop WITHOUT any intervening tool call, so a misbehaving
+# policy can never spin forever. DefaultPolicy.on_idle returns False, so the main
+# agent never reaches this counter — its behavior is unchanged.
+MAX_IDLE_CONTINUATIONS = 3
 
 # os.environ["LANGCHAIN_TRACING_V2"]="true"
 # os.environ["LANGCHAIN_PROJECT"]="own_agent_demo"
@@ -71,6 +78,10 @@ class AgentRuntime:
         self.max_tool_calls_per_turn = max_tool_calls_per_turn
         self.context = context
         self._sys_prompt: str | None = None
+        # Phase 0.7: consecutive on_idle continuations since the last tool call,
+        # bounded by MAX_IDLE_CONTINUATIONS. Reset on a new user turn and whenever a
+        # tool actually runs. Stays 0 for the main agent (DefaultPolicy never loops).
+        self._idle_continuations = 0
         self.thinking_mode: Literal["off", "on", "stream"] = "off"
         self.agent_tool_module = agent_tools
         self.agent_tool_path = Path(agent_tools.__file__).resolve()
@@ -119,9 +130,16 @@ class AgentRuntime:
           print(f"[Tool Reload] Failed, keeping previous runtime: {exc}")
           return False
 
+    def _policy(self) -> RunPolicy:
+        """The active per-run policy (Phase 0.7); DefaultPolicy when context.policy is None."""
+        return self.context.policy or DEFAULT_POLICY
+
     def get_tools(self) -> list:
         self.reload_runtime()
-        return [tool.to_schema() for tool in self.tools.values()]
+        schemas = [tool.to_schema() for tool in self.tools.values()]
+        # Phase 0.7: a run policy may hide tools (e.g. plan-mode = read-only).
+        # DefaultPolicy returns them unchanged, so the main agent is unaffected.
+        return self._policy().active_tools(schemas)
     def register_tool(self, new_tool: Type[AgentTool]):
         self.tools[new_tool.__name__] = new_tool
     async def initialize(self, *, replay_handler=None) -> None:
@@ -139,15 +157,19 @@ class AgentRuntime:
         """
         if user_text is not None:
             self._sys_prompt = sys_prompt
+            self._idle_continuations = 0  # fresh user turn — reset the idle gate
             await self.session_manager.add_message(
                 SessionEvent(role="user", parts=[TextPart(text=user_text)])
             )
 
         conversation = await self.session_manager.load_messages()
         if self._sys_prompt:
+            # Phase 0.7: the policy may wrap/extend the base prompt. DefaultPolicy
+            # returns it unchanged, so the main agent's prompt is identical.
+            sys_text = self._policy().system_prompt(self._sys_prompt)
             conversation = [SessionEvent(
                 role="system",
-                parts=[TextPart(text=self._sys_prompt)],
+                parts=[TextPart(text=sys_text)],
             )] + conversation
 
         last_user_idx = -1
@@ -194,7 +216,16 @@ class AgentRuntime:
         await self.emit("on_model_response", message=msg, context=self.context)
 
         if not tool_calls:
-            return False
+            # Phase 0.7 completion gate. DefaultPolicy.on_idle => False (done), so the
+            # main agent stops exactly as before. A capability policy may return True to
+            # keep looping while work remains (e.g. open todos); MAX_IDLE_CONTINUATIONS
+            # bounds consecutive idle re-loops so a misbehaving policy can't spin.
+            if self._idle_continuations >= MAX_IDLE_CONTINUATIONS:
+                self._idle_continuations = 0
+                return False
+            keep_going = await self._policy().on_idle(self.context)
+            self._idle_continuations = self._idle_continuations + 1 if keep_going else 0
+            return keep_going
 
         response_parts = []
         for tc in tool_calls:
@@ -208,10 +239,25 @@ class AgentRuntime:
             ))
 
         await self.session_manager.add_message(SessionEvent(role="tool", parts=response_parts))
+        self._idle_continuations = 0  # real progress this turn — clear the idle gate
         return True
 
     async def run_tool(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
         self.reload_runtime()
+        # Phase 0.6: enforce the total run budget BEFORE dispatch. The budget is shared
+        # across the whole run (generator + workers); when exhausted we return a clean
+        # error so the run wraps up with partial results instead of crashing. None on
+        # the main agent => no total cap => behavior unchanged.
+        budget = self.context.run_budget
+        if budget is not None:
+            if budget.exhausted():
+                return ToolResult(name=tool_name, error=True, result={
+                    "error": (
+                        "Run budget exhausted (tool-call or wall-clock limit reached). "
+                        "Stop calling tools and summarise the partial results so far."
+                    )
+                })
+            budget.calls += 1
         tool_cls = self.tools.get(tool_name)
         if not tool_cls:
             return ToolResult(name=tool_name, error=True, result={
