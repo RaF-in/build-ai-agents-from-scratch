@@ -50,3 +50,9 @@ class CapabilityConfig:
     max_rounds: int = 2         # max generator<->evaluator iterations
     verify: Literal["off", "on", "auto"] = "off"  # the evaluator gate (Phase 4/5)
     criteria: list[Criterion] = field(default_factory=list)
+    # Phase 5 calibration data (per-capability, set by the plugin to absolute paths).
+    # The engine ignores these; the generic calibration machinery reads them to load
+    # few-shot exemplars and the frozen regression set. None on capabilities that
+    # ship no calibration data yet.
+    eval_examples_dir: str | None = None
+    calibration_set_dir: str | None = None

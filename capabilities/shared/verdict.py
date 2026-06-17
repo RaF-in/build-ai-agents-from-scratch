@@ -13,6 +13,7 @@ prose if the model ever answers without calling the tool.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 from pydantic import BaseModel, Field
@@ -121,15 +122,39 @@ def render_feedback(verdict: Verdict, criteria: list[Criterion]) -> str:
     return "\n".join(lines)
 
 
-def record_verdict(verdict: Verdict, config, *, round_index: int) -> None:
-    """Trace hook. Phase 5 persists this to a ``verdicts`` DB table for the
-    calibration loop; for now it logs a one-line structured summary."""
+def record_verdict(verdict: Verdict, config, *, context: AgentContext, round_index: int) -> None:
+    """Trace hook (Phase 5.1). Logs a one-line structured summary AND persists the
+    verdict to the calibration ``verdicts`` table, snapshotting the graded report so
+    the run's workspace can be reaped without losing the calibration material."""
+    passed = verdict.passed(config.criteria)
     print(
         f"[Evaluator] round {round_index}: "
         f"weighted={verdict.weighted_score(config.criteria):.2f} "
-        f"passed={verdict.passed(config.criteria)} "
+        f"passed={passed} "
         f"failures={verdict.failures(config.criteria)}"
     )
+    try:
+        from .verdict_store import default_store
+        store = default_store()
+        run_id = os.path.basename(context.workspace_dir or "") or "unknown"
+        artifact_ref = None
+        report = read_artifact(context, "report.md")
+        if report.strip():
+            artifact_ref = store.snapshot_artifact(f"{run_id}-r{round_index}", report)
+        store.record(
+            capability=config.name,
+            run_id=run_id,
+            round_index=round_index,
+            scores=verdict.scores,
+            rationale=verdict.rationale,
+            feedback=verdict.feedback,
+            passed=passed,
+            weighted=verdict.weighted_score(config.criteria),
+            artifact_ref=artifact_ref,
+        )
+    except Exception as e:
+        # Trace logging is best-effort: a calibration-DB hiccup must never break a run.
+        print(f"[Evaluator] verdict trace not recorded: {e}")
 
 
 # Convenience: the evaluator role's tool set.

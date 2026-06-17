@@ -13,6 +13,7 @@ Scoring guidance:
 - Probe for uncited claims, unanswered sub-questions, weak/SEO sources, and link
   dumps with no synthesis. When in doubt, score lower.
 
+{{EVAL_EXAMPLES}}
 Step 3 — Submit your verdict: call the SubmitVerdict tool EXACTLY once with:
 - scores: each criterion name mapped to its [0,1] score,
 - rationale: each criterion name mapped to your one-line justification,

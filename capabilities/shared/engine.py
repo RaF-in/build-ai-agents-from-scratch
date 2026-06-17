@@ -135,7 +135,7 @@ async def run_evaluate(brief: str, config: CapabilityConfig, context: AgentConte
             # stop and return the current artifact (a calibration signal for Phase 5).
             print("[Evaluator] no verdict submitted; ending evaluation")
             return
-        record_verdict(verdict, config, round_index=round_index)
+        record_verdict(verdict, config, context=context, round_index=round_index)
         if verdict.passed(config.criteria):
             return
         write_artifact(context, "feedback.md", render_feedback(verdict, config.criteria))

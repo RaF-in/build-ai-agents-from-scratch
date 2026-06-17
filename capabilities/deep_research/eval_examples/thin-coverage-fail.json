@@ -1,0 +1,17 @@
+{
+  "label": "thin-coverage-fail",
+  "artifact_excerpt": "# Report on X\nX is widely used. Many companies adopt it. It has several benefits and some drawbacks. Overall it is popular.",
+  "scores": {
+    "coverage": 0.2,
+    "citation_quality": 0.1,
+    "source_quality": 0.2,
+    "synthesis": 0.3
+  },
+  "rationale": {
+    "coverage": "No sub-question is actually answered with evidence; only vague generalities.",
+    "citation_quality": "Zero inline citations for any factual claim.",
+    "source_quality": "No sources cited at all.",
+    "synthesis": "Hand-wavy summary with no concrete findings tied together."
+  },
+  "verdict": "fail"
+}

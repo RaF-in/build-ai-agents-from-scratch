@@ -15,9 +15,13 @@ from capabilities.shared.config import RoleConfig, CapabilityConfig
 from capabilities.shared.policies import PlanExecutePolicy
 from capabilities.shared.todo import TODO_TOOLS
 from capabilities.shared.verdict import SubmitVerdict
+from capabilities.shared.calibration import load_eval_examples, render_eval_examples
 from capabilities.deep_research.criteria import RESEARCH_CRITERIA
 
-_PROMPTS = Path(__file__).resolve().parent / "prompts"
+_PKG = Path(__file__).resolve().parent
+_PROMPTS = _PKG / "prompts"
+_EVAL_EXAMPLES_DIR = _PKG / "eval_examples"
+_CALIBRATION_SET_DIR = _PKG / "calibration_set"
 
 
 def _prompt(name: str) -> str:
@@ -38,6 +42,10 @@ def build_research_config() -> CapabilityConfig:
     from web.tools import DelegateWebSearchTool
 
     criteria = _criteria_block()
+    # Phase 5.2: the calibrated few-shot exemplars this capability ships are loaded
+    # from its own eval_examples/ and injected into the evaluator prompt — the same
+    # file-driven pattern as {{CRITERIA}}. The engine never sees this; it is data.
+    eval_examples = render_eval_examples(load_eval_examples(str(_EVAL_EXAMPLES_DIR)))
 
     planner = RoleConfig(
         name="planner",
@@ -58,7 +66,11 @@ def build_research_config() -> CapabilityConfig:
     )
     evaluator = RoleConfig(
         name="evaluator",
-        system_prompt=_prompt("evaluator.md").replace("{{CRITERIA}}", criteria),
+        system_prompt=(
+            _prompt("evaluator.md")
+            .replace("{{CRITERIA}}", criteria)
+            .replace("{{EVAL_EXAMPLES}}", eval_examples)
+        ),
         # ReadTool to read report.md; SubmitVerdict to return a structured score.
         tools=[ReadTool, SubmitVerdict],
     )
@@ -75,6 +87,10 @@ def build_research_config() -> CapabilityConfig:
         # skipped on trivial ones.
         verify="auto",
         criteria=RESEARCH_CRITERIA,
+        # Phase 5: where this capability's calibration data lives. The generic
+        # agreement-rate runner and /calibrate-evaluator skill read these paths.
+        eval_examples_dir=str(_EVAL_EXAMPLES_DIR),
+        calibration_set_dir=str(_CALIBRATION_SET_DIR),
     )
 
 

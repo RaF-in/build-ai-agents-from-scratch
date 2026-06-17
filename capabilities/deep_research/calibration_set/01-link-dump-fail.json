@@ -1,0 +1,13 @@
+{
+  "label": "link-dump-fail",
+  "artifact": "# Report\nHere are some links about the topic:\n- https://a.example.com\n- https://b.example.com\n- https://c.example.com\nThese cover the subject. See them for details.",
+  "expected": {
+    "passed": false,
+    "scores": {
+      "coverage": 0.2,
+      "citation_quality": 0.3,
+      "source_quality": 0.3,
+      "synthesis": 0.1
+    }
+  }
+}

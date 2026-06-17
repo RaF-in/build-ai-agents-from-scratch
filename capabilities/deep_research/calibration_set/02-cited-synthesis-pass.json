@@ -1,0 +1,13 @@
+{
+  "label": "cited-synthesis-pass",
+  "artifact": "# Report: Does X scale?\n## Throughput\nX sustains 12k req/s on commodity hardware in independent tests [bench.example.org/x-2024].\n## Failure modes\nUnder partition, X favors availability and reconciles on heal [docs.x.example/consistency].\n## Cost\nA 3-node cluster runs ~$300/mo on current cloud pricing [cloudcalc.example/x].\n## Synthesis\nX fits availability-first workloads tolerant of eventual consistency; for strict serializability, prefer a CP store. Each sub-question above is answered with a primary or vendor source.\n\n## Sources\n- bench.example.org/x-2024\n- docs.x.example/consistency\n- cloudcalc.example/x",
+  "expected": {
+    "passed": true,
+    "scores": {
+      "coverage": 0.9,
+      "citation_quality": 0.9,
+      "source_quality": 0.7,
+      "synthesis": 0.8
+    }
+  }
+}

@@ -571,6 +571,49 @@ def agreement_rate(config) -&gt; float:
         </div>
         <p class="acc">Changing the evaluator prompt produces a measurable agreement-rate delta; a disagreement logged via <code>/calibrate-evaluator</code> appears as a new few-shot example.</p>
 
+        <!-- ---------------- Phase 5 extension (proposed) ---------------- -->
+        <h3>Phase 5 extension &mdash; instruction-level calibration <span class="tag tag-shared">SHARED ENGINE</span> <span class="tag tag-future">PROPOSED &mdash; PENDING REVIEW</span></h3>
+        <div class="warning-box">
+            <p><strong>Scope &amp; framing.</strong> The four parts above cover <em>few-shot</em> calibration and the agreement metric. They already let you hand-edit the instruction body of <code>evaluator.md</code> and re-run <code>agreement</code> to see a delta. These two extensions make the <strong>instruction-text</strong> side of the loop first-class: (A) track agreement across prompt versions so the before/after is recorded, not eyeballed; (B) let a model <em>propose</em> instruction edits from the cases the evaluator got wrong. This is still <strong>prompt calibration, human-gated</strong> &mdash; not weight fine-tuning, and not unattended auto-optimization. Both live in the generic <code>capabilities/shared/</code> layer; no per-capability code, only data + prompts.</p>
+        </div>
+
+        <h4>Extension A &mdash; prompt-version log &amp; agreement history</h4>
+        <p><strong>Problem.</strong> <code>agreement</code> reports a rate <em>now</em>, but nothing ties a rate to the exact evaluator prompt that produced it, so &ldquo;v1 = 70%, v2 = 85%&rdquo; is left to manual memory. <strong>Fix:</strong> on every <code>agreement</code> run, fingerprint the assembled evaluator prompt and persist the score against it.</p>
+        <ul>
+            <li><strong>Where:</strong> <code>capabilities/shared/verdict_store.py</code> (new table) + <code>calibration.py</code> (record on run). Capability-blind; keyed by capability name like the <code>verdicts</code> table.</li>
+            <li><strong>Data model</strong> &mdash; a new <code>prompt_runs</code> table:
+<pre><code>{ id, capability, created_at,
+  prompt_hash,            # sha256 of the assembled evaluator system prompt
+  instructions_hash,     # sha256 of evaluator.md ONLY (few-shot excluded)
+  n_examples,            # how many few-shot exemplars were in the prompt
+  agreement_rate, mean_abs_delta,
+  n_cases, git_rev }     # git_rev best-effort (None outside a repo)</code></pre>
+                Splitting <code>prompt_hash</code> from <code>instructions_hash</code> is what lets you attribute a delta to an <em>instruction</em> edit vs. a new few-shot example.</li>
+            <li><strong>CLI:</strong> <code>agreement</code> writes one <code>prompt_runs</code> row each invocation; <code>agreement --history &lt;capability&gt;</code> prints the trend (rate, &Delta; vs. previous, instruction-hash change marker, example count) newest-first.</li>
+            <li><strong>No new infra:</strong> reuses the existing calibration SQLite DB (<code>AGENT_CALIBRATION_DB</code>) and the <code>agreement_rate</code> runner already built.</li>
+        </ul>
+        <p class="acc">Two consecutive <code>agreement</code> runs across an <code>evaluator.md</code> edit produce two <code>prompt_runs</code> rows with different <code>instructions_hash</code> and a recorded rate delta; <code>--history</code> shows the trend.</p>
+
+        <h4>Extension B &mdash; LLM-assisted instruction refinement (human-gated)</h4>
+        <p><strong>Problem.</strong> Editing the instruction rules in <code>evaluator.md</code> is fully manual. <strong>Fix:</strong> a command that drafts a revised instruction block from the cases the evaluator <em>missed</em>, for the human to review &mdash; never applied unattended.</p>
+        <ul>
+            <li><strong>Marked region only.</strong> <code>evaluator.md</code> gets explicit fences, e.g. <code>&lt;!-- BEGIN:INSTRUCTIONS --&gt;</code> &hellip; <code>&lt;!-- END:INSTRUCTIONS --&gt;</code>. The refiner may rewrite <strong>only</strong> the text between them; the <code>{{CRITERIA}}</code> / <code>{{EVAL_EXAMPLES}}</code> slots and the <code>SubmitVerdict</code> contract are out of bounds.</li>
+            <li><strong>Flow</strong> (new <code>refine-instructions</code> backend in <code>calibration.py</code>, driven by a skill step):
+                <ol>
+                    <li>Run <code>agreement</code>; collect the MISS cases (artifact, expected verdict, the evaluator&rsquo;s actual scores, per-criterion &Delta;).</li>
+                    <li>Send the <em>current</em> instruction block + those MISS cases to a model with a fixed meta-prompt: &ldquo;propose minimal instruction edits that would fix these disagreements without overfitting; keep it general.&rdquo;</li>
+                    <li>Show the human a <strong>unified diff</strong> of the proposed instruction block. Nothing is written until the human accepts.</li>
+                    <li>On accept: write the new block back between the fences, re-run <code>agreement</code>, and print before/after (Extension A records both). If the rate <em>drops</em>, offer a one-command revert (the previous block is snapshotted).</li>
+                </ol>
+            </li>
+            <li><strong>Guardrails:</strong> human-gated (diff approval mandatory); edits confined to the fenced region; never auto-commits to git; the regression set is the objective gate, so a refinement that lowers agreement is visibly rejected; the meta-prompt explicitly warns against overfitting to the held-out cases.</li>
+            <li><strong>Model:</strong> default to the latest capable Claude model for the refinement call (a reasoning-heavy, low-frequency task), independent of the (smaller) evaluator model.</li>
+        </ul>
+        <div class="info-box">
+            <p><strong>Still deferred (unchanged):</strong> real weight fine-tuning / SFT of a dedicated judge model &mdash; only after several hundred labeled verdicts <em>and</em> both few-shot and instruction calibration have plateaued. These extensions are the rung between the manual loop and that gated future path.</p>
+        </div>
+        <p class="acc">From a set of MISS cases, the refiner proposes an instruction-block diff; on human accept it is written between the fences, agreement is re-scored, and the before/after delta is recorded &mdash; a rate regression is surfaced and one-command revertible.</p>
+
         <!-- ============================================================ -->
         <h2 id="phase6"><span class="phase-number">6</span>Phase 6 &mdash; Synthesis &amp; citations <span class="tag tag-config">CONFIG PLUGIN</span></h2>
         <ul>

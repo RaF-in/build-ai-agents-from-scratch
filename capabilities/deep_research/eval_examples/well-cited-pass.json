@@ -1,0 +1,17 @@
+{
+  "label": "well-cited-pass",
+  "artifact_excerpt": "# Report on X\n## Sub-question 1: adoption\nAdoption grew 40% YoY in 2024 [vendor-report.com/2024]. ## Sub-question 2: tradeoffs\nLatency improves but memory cost rises ~2x [bench.example.org/study]. ## Synthesis\nFor latency-bound workloads under a memory budget, X wins; otherwise prefer Y.\n\n## Sources\n- vendor-report.com/2024\n- bench.example.org/study",
+  "scores": {
+    "coverage": 0.9,
+    "citation_quality": 0.9,
+    "source_quality": 0.7,
+    "synthesis": 0.8
+  },
+  "rationale": {
+    "coverage": "Each named sub-question is answered with a concrete, evidenced claim.",
+    "citation_quality": "Every factual claim carries a resolvable inline citation.",
+    "source_quality": "Primary benchmark + vendor data rather than SEO filler.",
+    "synthesis": "Ends with a decision rule, not a link dump."
+  },
+  "verdict": "pass"
+}
