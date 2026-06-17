@@ -572,7 +572,7 @@ def agreement_rate(config) -&gt; float:
         <p class="acc">Changing the evaluator prompt produces a measurable agreement-rate delta; a disagreement logged via <code>/calibrate-evaluator</code> appears as a new few-shot example.</p>
 
         <!-- ---------------- Phase 5 extension (proposed) ---------------- -->
-        <h3>Phase 5 extension &mdash; instruction-level calibration <span class="tag tag-shared">SHARED ENGINE</span> <span class="tag tag-future">PROPOSED &mdash; PENDING REVIEW</span></h3>
+        <h3>Phase 5 extension &mdash; instruction-level calibration <span class="tag tag-shared">SHARED ENGINE</span> <span class="tag tag-config">IMPLEMENTED</span></h3>
         <div class="warning-box">
             <p><strong>Scope &amp; framing.</strong> The four parts above cover <em>few-shot</em> calibration and the agreement metric. They already let you hand-edit the instruction body of <code>evaluator.md</code> and re-run <code>agreement</code> to see a delta. These two extensions make the <strong>instruction-text</strong> side of the loop first-class: (A) track agreement across prompt versions so the before/after is recorded, not eyeballed; (B) let a model <em>propose</em> instruction edits from the cases the evaluator got wrong. This is still <strong>prompt calibration, human-gated</strong> &mdash; not weight fine-tuning, and not unattended auto-optimization. Both live in the generic <code>capabilities/shared/</code> layer; no per-capability code, only data + prompts.</p>
         </div>

@@ -91,6 +91,8 @@ def build_research_config() -> CapabilityConfig:
         # agreement-rate runner and /calibrate-evaluator skill read these paths.
         eval_examples_dir=str(_EVAL_EXAMPLES_DIR),
         calibration_set_dir=str(_CALIBRATION_SET_DIR),
+        # Phase 5 ext B: the refiner edits ONLY the fenced INSTRUCTIONS region here.
+        evaluator_prompt_path=str(_PROMPTS / "evaluator.md"),
     )
 
 

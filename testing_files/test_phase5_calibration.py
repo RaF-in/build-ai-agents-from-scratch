@@ -204,6 +204,132 @@ def test_label_and_learn_and_pending():
     print("5.4 label_and_learn writes a corrected exemplar + clears review queue: OK")
 
 
+# ---------------- ext A: prompt-version log & agreement history ----------------
+def _ext_evaluator_md(tmp):
+    """A file-backed evaluator prompt with a fenced INSTRUCTIONS region. Carries the
+    [[EVALUATOR]] marker + a {{SCORE_LOWER}} switch the fake reads to decide pass/fail."""
+    path = os.path.join(tmp, "evaluator.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(
+            "[[EVALUATOR]] grade the report in your workspace.\n"
+            "<!-- BEGIN:INSTRUCTIONS -->\n"
+            "Be lenient: a GOOD-looking report passes.\n"
+            "<!-- END:INSTRUCTIONS -->\n"
+            "{{EVAL_EXAMPLES}}\nSubmit your verdict.\n"
+        )
+    return path
+
+
+def _ext_config(tmp, calset_dir):
+    """Build a config whose evaluator system prompt is assembled from the fenced file,
+    so editing the file (via the refiner) actually changes how it grades."""
+    md = _ext_evaluator_md(tmp)
+    examples_dir = os.path.join(tmp, "eval_examples")
+    os.makedirs(examples_dir, exist_ok=True)
+    with open(md, encoding="utf-8") as f:
+        sysp = f.read().replace("{{EVAL_EXAMPLES}}", "")
+    return CapabilityConfig(
+        name="fake", planner=None, generator=None,
+        evaluator=RoleConfig(name="evaluator", system_prompt=sysp,
+                             tools=[ReadTool, SubmitVerdict]),
+        criteria=CRITERIA, calibration_set_dir=calset_dir,
+        eval_examples_dir=examples_dir, evaluator_prompt_path=md,
+    )
+
+
+def _rebuild_ext_config(md, calset_dir, examples_dir):
+    """Re-assemble the config from the (possibly just-edited) evaluator.md on disk —
+    stands in for load_config(reload=True) for the 'fake' capability in tests."""
+    with open(md, encoding="utf-8") as f:
+        sysp = f.read().replace("{{EVAL_EXAMPLES}}", "")
+    return CapabilityConfig(
+        name="fake", planner=None, generator=None,
+        evaluator=RoleConfig(name="evaluator", system_prompt=sysp,
+                             tools=[ReadTool, SubmitVerdict]),
+        criteria=CRITERIA, calibration_set_dir=calset_dir,
+        eval_examples_dir=examples_dir, evaluator_prompt_path=md,
+    )
+
+
+def test_prompt_fingerprint_and_history():
+    vstore.reset_default_store()
+    os.environ["AGENT_CALIBRATION_DB"] = os.path.join(_TMP, "extA.db")
+    tmp = tempfile.mkdtemp(prefix="extA_")
+    cfg = _ext_config(tmp, calset_dir=tmp)
+
+    ph1, ih1, n1 = calib.prompt_fingerprint(cfg)
+    assert ph1 and ih1 and n1 == 0
+    # editing ONLY a few-shot example moves prompt_hash but NOT instructions_hash
+    cfg2 = _rebuild_ext_config(cfg.evaluator_prompt_path, tmp, cfg.eval_examples_dir)
+    cfg2.evaluator.system_prompt += "\n### Example: x (pass)\nCorrect scores: a=0.9\n"
+    ph2, ih2, _ = calib.prompt_fingerprint(cfg2)
+    assert ph2 != ph1 and ih2 == ih1, "few-shot change must not move instructions_hash"
+    # editing the instruction file moves instructions_hash
+    calib.write_instructions(cfg, "Be strict now: demand citations.")
+    _, ih3, _ = calib.prompt_fingerprint(
+        _rebuild_ext_config(cfg.evaluator_prompt_path, tmp, cfg.eval_examples_dir))
+    assert ih3 != ih1, "instruction edit must move instructions_hash"
+
+    store = vstore.default_store()
+    calib.record_prompt_run(cfg, calib.AgreementReport(0.7, [], 0.1), store=store)
+    calib.record_prompt_run(cfg, calib.AgreementReport(0.9, [], 0.05), store=store)
+    hist = calib.prompt_run_history("fake")
+    assert len(hist) == 2 and hist[0]["agreement_rate"] == 0.9   # newest first
+    assert "rate 90%" in calib.format_history(hist)
+    print("ext A fingerprint splits instructions vs few-shot; history records trend: OK")
+
+
+# ---------------- ext B: LLM-assisted instruction refinement ----------------
+async def refine_and_eval_acompletion(model, messages, tools=None, **kw):
+    """Doubles as the evaluator (delegates to the eval fake) and the refiner: when
+    the system prompt is the refiner meta-prompt, returns a revised instruction block."""
+    sysp = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
+    if "INSTRUCTION block" in sysp:                 # the refiner meta-prompt
+        return NS(choices=[NS(message=NS(
+            content="Be strict: a report passes only with inline citations.",
+            tool_calls=None))])
+    return await fake_eval_acompletion(model, messages, tools=tools, **kw)
+
+
+async def test_refine_propose_apply_revert():
+    vstore.reset_default_store()
+    os.environ["AGENT_CALIBRATION_DB"] = os.path.join(_TMP, "extB.db")
+    agentmod.acompletion = refine_and_eval_acompletion
+    tmp = tempfile.mkdtemp(prefix="extB_")
+    calset = os.path.join(tmp, "calset")
+    os.makedirs(calset)
+    # one case the lenient evaluator gets WRONG: a GOOD-looking report the human fails.
+    with open(os.path.join(calset, "01.json"), "w") as f:
+        json.dump({"label": "over-scored", "artifact": "GOOD looking but uncited",
+                   "expected": {"passed": False, "scores": {"a": 0.2, "b": 0.9}}}, f)
+    cfg = _ext_config(tmp, calset_dir=calset)
+    md, exdir = cfg.evaluator_prompt_path, cfg.eval_examples_dir
+
+    # propose: writes NOTHING to the prompt, returns a reviewable diff
+    before_block = calib.read_instructions(cfg)
+    proposal = await calib.propose_refinement(cfg)
+    assert proposal.miss_labels == ["over-scored"], proposal.miss_labels
+    assert "Be strict" in proposal.proposed and "+" in proposal.diff
+    assert os.path.isfile(proposal.proposal_path)
+    assert calib.read_instructions(cfg) == before_block      # prompt untouched by propose
+
+    # apply: writes the block between the fences + records before/after prompt_runs
+    result = await calib.apply_refinement(
+        cfg, proposal.proposed,
+        rebuild=lambda: _rebuild_ext_config(md, calset, exdir))
+    assert "Be strict" in calib.read_instructions(cfg)        # fenced region replaced
+    # the {{EVAL_EXAMPLES}} slot + SubmitVerdict line outside the fences are intact
+    raw = open(md, encoding="utf-8").read()
+    assert "{{EVAL_EXAMPLES}}" in raw and "Submit your verdict." in raw
+    assert len(calib.prompt_run_history("fake")) == 2         # before + after logged
+    assert isinstance(result.regressed, bool)
+
+    # revert: restores the pre-apply block
+    assert calib.revert_instructions(cfg) is True
+    assert calib.read_instructions(cfg) == before_block
+    print("ext B propose->apply->revert; fences honored, before/after logged: OK")
+
+
 async def main():
     test_store_roundtrip()
     test_record_verdict_persists_and_snapshots()
@@ -212,6 +338,8 @@ async def main():
     await test_agreement_rate()
     await test_agreement_tolerance()
     test_label_and_learn_and_pending()
+    test_prompt_fingerprint_and_history()
+    await test_refine_propose_apply_revert()
     print("\nALL PHASE 5 CHECKS PASSED")
 
 

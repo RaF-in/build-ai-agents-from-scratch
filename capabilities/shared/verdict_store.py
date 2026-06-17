@@ -38,6 +38,22 @@ CREATE TABLE IF NOT EXISTS verdicts (
     human_label_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_verdicts_cap_id ON verdicts (capability, id);
+
+-- Phase 5 ext A: one row per `agreement` run, fingerprinting the exact evaluator
+-- prompt that produced the rate so a before/after delta is recorded, not eyeballed.
+CREATE TABLE IF NOT EXISTS prompt_runs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    capability        TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    prompt_hash       TEXT NOT NULL,   -- sha256 of the assembled evaluator system prompt
+    instructions_hash TEXT NOT NULL,   -- sha256 of evaluator.md ONLY (few-shot excluded)
+    n_examples        INTEGER NOT NULL,-- few-shot exemplars present in the prompt
+    agreement_rate    REAL NOT NULL,
+    mean_abs_delta    REAL NOT NULL,
+    n_cases           INTEGER NOT NULL,
+    git_rev           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_prompt_runs_cap_id ON prompt_runs (capability, id);
 """
 
 
@@ -112,6 +128,32 @@ class VerdictStore:
                 (json.dumps(expected), verdict_id),
             )
 
+    def record_prompt_run(
+        self,
+        *,
+        capability: str,
+        prompt_hash: str,
+        instructions_hash: str,
+        n_examples: int,
+        agreement_rate: float,
+        mean_abs_delta: float,
+        n_cases: int,
+        git_rev: str | None = None,
+    ) -> int:
+        """Log an agreement-rate measurement against the prompt that produced it."""
+        with self._connect() as conn:
+            cur = conn.execute(
+                "INSERT INTO prompt_runs (capability, created_at, prompt_hash, "
+                "instructions_hash, n_examples, agreement_rate, mean_abs_delta, "
+                "n_cases, git_rev) VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    capability, _now_iso(), prompt_hash, instructions_hash,
+                    int(n_examples), float(agreement_rate), float(mean_abs_delta),
+                    int(n_cases), git_rev,
+                ),
+            )
+            return int(cur.lastrowid)
+
     # ---- reading -----------------------------------------------------------
 
     def get(self, verdict_id: int) -> dict | None:
@@ -128,6 +170,15 @@ class VerdictStore:
                 (capability, limit),
             ).fetchall()
             return [_row_to_dict(r) for r in rows]
+
+    def prompt_run_history(self, capability: str, limit: int = 20) -> list[dict]:
+        """Past agreement runs for a capability, newest first (the trend `--history`)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM prompt_runs WHERE capability = ? ORDER BY id DESC LIMIT ?",
+                (capability, limit),
+            ).fetchall()
+            return [dict(r) for r in rows]
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:

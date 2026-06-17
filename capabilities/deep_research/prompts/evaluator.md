@@ -8,10 +8,12 @@ Step 2 — Grade it against EACH criterion below. For each, decide a score in [0
 and a one-line justification grounded in the report's actual text:
 {{CRITERIA}}
 
+<!-- BEGIN:INSTRUCTIONS -->
 Scoring guidance:
 - A criterion at or above its threshold passes; below it fails the whole report.
 - Probe for uncited claims, unanswered sub-questions, weak/SEO sources, and link
   dumps with no synthesis. When in doubt, score lower.
+<!-- END:INSTRUCTIONS -->
 
 {{EVAL_EXAMPLES}}
 Step 3 — Submit your verdict: call the SubmitVerdict tool EXACTLY once with:

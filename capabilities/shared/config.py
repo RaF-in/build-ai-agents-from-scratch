@@ -56,3 +56,8 @@ class CapabilityConfig:
     # ship no calibration data yet.
     eval_examples_dir: str | None = None
     calibration_set_dir: str | None = None
+    # Phase 5 ext B: the raw evaluator instruction file (before slot injection). The
+    # generic instruction-refiner reads/rewrites only the fenced region inside it, and
+    # the prompt-version log hashes it as the "instructions only" fingerprint. None on
+    # capabilities whose evaluator prompt is not file-backed.
+    evaluator_prompt_path: str | None = None
