@@ -50,6 +50,15 @@ def read_artifact(context: AgentContext, name: str) -> str:
         return ""
 
 
+def remove_artifact(context: AgentContext, name: str) -> None:
+    """Delete an artifact if present (e.g. clear last round's verdict.json before a
+    fresh evaluator round so a stale file is never mistaken for this round's)."""
+    try:
+        os.remove(artifact_path(context, name))
+    except FileNotFoundError:
+        pass
+
+
 def read_final_artifact(workspace_dir: str | None) -> str:
     """The run's deliverable: the first of report.md / feedback.md / spec.md that
     exists. Falls back to a note when a (possibly budget-truncated) run produced

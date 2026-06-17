@@ -14,6 +14,7 @@ from pathlib import Path
 from capabilities.shared.config import RoleConfig, CapabilityConfig
 from capabilities.shared.policies import PlanExecutePolicy
 from capabilities.shared.todo import TODO_TOOLS
+from capabilities.shared.verdict import SubmitVerdict
 from capabilities.deep_research.criteria import RESEARCH_CRITERIA
 
 _PROMPTS = Path(__file__).resolve().parent / "prompts"
@@ -58,7 +59,8 @@ def build_research_config() -> CapabilityConfig:
     evaluator = RoleConfig(
         name="evaluator",
         system_prompt=_prompt("evaluator.md").replace("{{CRITERIA}}", criteria),
-        tools=[ReadTool],
+        # ReadTool to read report.md; SubmitVerdict to return a structured score.
+        tools=[ReadTool, SubmitVerdict],
     )
 
     return CapabilityConfig(
@@ -68,9 +70,10 @@ def build_research_config() -> CapabilityConfig:
         evaluator=evaluator,
         breadth=5,
         max_rounds=2,
-        # Evaluator stays OFF until Phase 4 implements real criteria scoring + the
-        # `auto` gate; until then plan→gen returns the report directly.
-        verify="off",
+        # Phase 4: the skeptical evaluator now scores against RESEARCH_CRITERIA and
+        # gates on `auto` — it runs on non-trivial briefs (>=3 sub-questions) and is
+        # skipped on trivial ones.
+        verify="auto",
         criteria=RESEARCH_CRITERIA,
     )
 

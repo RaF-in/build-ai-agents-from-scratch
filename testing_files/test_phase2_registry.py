@@ -86,7 +86,7 @@ def test_config_is_complete():
     # criteria injected into BOTH generator and evaluator prompts
     assert "coverage" in c.generator.system_prompt
     assert "coverage" in c.evaluator.system_prompt
-    assert c.verify == "off"
+    assert c.verify == "auto"   # Phase 4 enabled the skeptical evaluator gate
     print("config: RESEARCH_CONFIG complete; criteria injected into gen+eval: OK")
 
 

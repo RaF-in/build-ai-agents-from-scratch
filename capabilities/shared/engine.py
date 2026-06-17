@@ -14,14 +14,17 @@ from __future__ import annotations
 
 import asyncio
 
+from rich import print
+
 from tool_base import AgentContext, RunBudget
 from subagent_tools import run_subagent
 from .config import CapabilityConfig, RoleConfig
 from .todo import TodoList
 from .artifacts import (
     make_run_workspace, read_final_artifact, schedule_workspace_cleanup,
-    read_artifact, write_artifact,
+    read_artifact, write_artifact, remove_artifact,
 )
+from .verdict import load_verdict, record_verdict, render_feedback
 
 # Today the topology is a constant; a Phase 9 meta-planner can emit it as JSON for
 # the same executor (no "3" is hardcoded into the engine).
@@ -90,10 +93,20 @@ async def run_generate(brief: str, config: CapabilityConfig, context: AgentConte
     # so it is not force-stopped at 10 calls or killed at 300s. It writes the final
     # report.md (and any findings/*.md) directly into the workspace.
     spec = read_artifact(context, "spec.md") or brief
+    # On a feedback round (Phase 4 loop), prepend the evaluator's concrete fixes so
+    # the generator revises the EXISTING report.md instead of starting fresh.
+    feedback = read_artifact(context, "feedback.md")
+    task = spec
+    if feedback.strip():
+        task = (
+            f"{spec}\n\n---\nA previous draft of report.md was reviewed and did NOT "
+            f"pass. Revise report.md to address this feedback (read the existing "
+            f"report.md and edit it):\n\n{feedback}"
+        )
     budget = context.run_budget
     await spawn_role(
         config.generator,
-        task=spec,
+        task=task,
         context=context,
         max_tool_calls_per_turn=200,
         timeout_s=budget.max_wall_clock_s if budget else None,
@@ -101,29 +114,60 @@ async def run_generate(brief: str, config: CapabilityConfig, context: AgentConte
 
 
 async def run_evaluate(brief: str, config: CapabilityConfig, context: AgentContext) -> None:
-    # The `auto` gate (Phase 4/5 fills in real criteria scoring). With verify="off"
-    # (the default) this returns immediately, so plan→gen alone yields the result.
-    if not _should_verify(config) or config.evaluator is None:
+    # The GAN core (Phase 4): a skeptical evaluator scores report.md against the
+    # config's weighted/thresholded criteria, gated by `verify` (off/on/auto). On a
+    # failing round it writes feedback.md and re-runs the generator, bounded by
+    # max_rounds + RunBudget.
+    if config.evaluator is None or not should_verify(config, context):
         return
-    for _ in range(max(1, config.max_rounds)):
+    if not read_artifact(context, "report.md").strip():
+        return   # nothing to grade (generator produced no report)
+
+    for round_index in range(1, max(1, config.max_rounds) + 1):
         if context.run_budget and context.run_budget.exhausted():
             break
-        target = read_artifact(context, "report.md") or read_artifact(context, "spec.md")
-        verdict = await spawn_role(config.evaluator, task=target, context=context)
-        write_artifact(context, "verdict.md", verdict)
-        if _verdict_passed(verdict):
+        remove_artifact(context, "verdict.json")   # never read a stale round's verdict
+        await spawn_role(config.evaluator, task=_eval_task(context), context=context)
+
+        verdict = load_verdict(context)
+        if verdict is None:
+            # Evaluator answered without submitting a verdict. Don't loop blindly —
+            # stop and return the current artifact (a calibration signal for Phase 5).
+            print("[Evaluator] no verdict submitted; ending evaluation")
             return
-        write_artifact(context, "feedback.md", verdict)
+        record_verdict(verdict, config, round_index=round_index)
+        if verdict.passed(config.criteria):
+            return
+        write_artifact(context, "feedback.md", render_feedback(verdict, config.criteria))
         await run_generate(brief, config, context)   # iterate on the feedback
 
 
-def _should_verify(config: CapabilityConfig) -> bool:
-    # "auto" (cost-aware) selection is Phase 5; until then it behaves like "off".
-    return config.verify == "on"
+def should_verify(config: CapabilityConfig, context: AgentContext) -> bool:
+    """The evaluator gate. off → never; on → always; auto → only when the task
+    looks non-trivial (default-on bias for a weaker model)."""
+    if config.verify == "off":
+        return False
+    if config.verify == "on":
+        return True
+    return _looks_nontrivial(context)
 
 
-def _verdict_passed(verdict: str) -> bool:
-    return "PASS" in (verdict or "").upper()
+def _looks_nontrivial(context: AgentContext) -> bool:
+    # Read the planner's spec.md (in the shared workspace) and count sub-questions.
+    # The generator's todo list lives in its own child context, so the spec is the
+    # signal the parent actually has at eval time.
+    spec = read_artifact(context, "spec.md")
+    sub_qs = [ln for ln in spec.splitlines() if ln.strip()[:1].isdigit()]
+    return len(sub_qs) >= 3
+
+
+def _eval_task(context: AgentContext) -> str:
+    return (
+        "Skeptically grade the research report. Read report.md in your run "
+        "workspace, score every criterion in [0,1] with a one-line rationale, then "
+        "call SubmitVerdict exactly once with your scores, rationale, and concrete "
+        "feedback for any criterion below threshold."
+    )
 
 
 PHASE_RUNNERS = {"plan": run_plan, "gen": run_generate, "eval": run_evaluate}
