@@ -11,12 +11,19 @@ which child_context() shares down the whole role/worker subtree (Phase 0.2).
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
+import time
 
 from tool_base import AgentContext
 
 ARTIFACT_ROOT = os.path.join(tempfile.gettempdir(), "agent_runs")
 FINAL_ARTIFACT_CANDIDATES = ("report.md", "feedback.md", "spec.md")
+
+# Phase 7.5: per-run workspaces are reaped once older than this TTL (override via the
+# AGENT_WORKSPACE_TTL_S env var). Default 6h — long enough that the entry tool's
+# returned report_path stays valid well past the run, short enough to bound disk use.
+WORKSPACE_TTL_S = int(os.getenv("AGENT_WORKSPACE_TTL_S", str(6 * 3600)))
 
 
 def make_run_workspace() -> str:
@@ -73,8 +80,34 @@ def read_final_artifact(workspace_dir: str | None) -> str:
     return "(run produced no artifact)"
 
 
-def schedule_workspace_cleanup(workspace_dir: str | None) -> None:
-    """TTL sweep hook — fully built in Phase 7. A no-op today so run_pipeline's
-    finally clause is already wired; workspaces live under ARTIFACT_ROOT and are
-    cheap to reap later."""
-    return None
+def schedule_workspace_cleanup(
+    workspace_dir: str | None,
+    *,
+    ttl_s: int | None = None,
+    _now: float | None = None,
+) -> int:
+    """Phase 7.5 TTL sweep: reap ``run_*`` workspaces under ARTIFACT_ROOT older than
+    the TTL. The just-finished ``workspace_dir`` is SPARED — its files are fresh and
+    the entry tool still returns its ``report_path``; a later run reaps it once it
+    ages out. Best-effort: I/O errors are swallowed so cleanup never breaks a run.
+    Returns the number of workspaces removed (for tests/observability)."""
+    ttl = WORKSPACE_TTL_S if ttl_s is None else ttl_s
+    now = time.time() if _now is None else _now
+    removed = 0
+    try:
+        names = os.listdir(ARTIFACT_ROOT)
+    except FileNotFoundError:
+        return 0
+    for name in names:
+        if not name.startswith("run_"):
+            continue
+        path = os.path.join(ARTIFACT_ROOT, name)
+        if path == workspace_dir or not os.path.isdir(path):
+            continue   # spare the current run; skip non-dirs
+        try:
+            if now - os.path.getmtime(path) > ttl:
+                shutil.rmtree(path, ignore_errors=True)
+                removed += 1
+        except OSError:
+            continue
+    return removed

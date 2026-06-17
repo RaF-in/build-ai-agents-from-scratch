@@ -15,7 +15,10 @@
 from typing import Any, Awaitable, Type, TypeAlias, Literal, Protocol, overload
 from context.context import prepare_system_message
 from context.memory import MemoryManager
-from litellm import acompletion
+# Phase 7.3: route model calls through the resilience wrapper (retry/backoff +
+# optional fallbacks). Kept bound to the name `acompletion` so call sites — and the
+# tests that monkeypatch `agent.acompletion` — are unchanged.
+from llm_resilience import resilient_acompletion as acompletion
 import asyncio
 import json
 # import os
@@ -46,6 +49,19 @@ TOOL_CALL_GUARDRAIL_INSTRUCTION = (
 # policy can never spin forever. DefaultPolicy.on_idle returns False, so the main
 # agent never reaches this counter — its behavior is unchanged.
 MAX_IDLE_CONTINUATIONS = 3
+
+# Phase 7.2 loop safety: if the model emits the EXACT same tool call(s) this many
+# times in a row, the run is stuck (e.g. retrying a failing fetch forever). Abort the
+# tool loop and force a no-tools summarizing turn so the run ends with whatever
+# partial result exists, instead of spinning until the budget/turn cap. Normal agents
+# vary their calls and never hit this.
+MAX_REPEATED_TOOL_CALLS = 3
+
+REPEATED_TOOL_CALL_GUARDRAIL = (
+    "You have repeated the same tool call several times with no new result. "
+    "Stop calling tools now and summarise what you have found so far, noting what "
+    "remains unresolved."
+)
 
 # os.environ["LANGCHAIN_TRACING_V2"]="true"
 # os.environ["LANGCHAIN_PROJECT"]="own_agent_demo"
@@ -82,6 +98,12 @@ class AgentRuntime:
         # bounded by MAX_IDLE_CONTINUATIONS. Reset on a new user turn and whenever a
         # tool actually runs. Stays 0 for the main agent (DefaultPolicy never loops).
         self._idle_continuations = 0
+        # Phase 7.2: signature of the previous turn's tool call(s) + how many times in
+        # a row it has repeated, and a one-shot flag to force a no-tools summarizing
+        # turn once the repeat limit is hit. Reset on every new user turn.
+        self._last_tool_sig: str | None = None
+        self._repeat_count = 0
+        self._force_summary = False
         self.thinking_mode: Literal["off", "on", "stream"] = "off"
         self.agent_tool_module = agent_tools
         self.agent_tool_path = Path(agent_tools.__file__).resolve()
@@ -158,6 +180,9 @@ class AgentRuntime:
         if user_text is not None:
             self._sys_prompt = sys_prompt
             self._idle_continuations = 0  # fresh user turn — reset the idle gate
+            self._last_tool_sig = None    # and the repeated-call detector (7.2)
+            self._repeat_count = 0
+            self._force_summary = False
             await self.session_manager.add_message(
                 SessionEvent(role="user", parts=[TextPart(text=user_text)])
             )
@@ -185,15 +210,37 @@ class AgentRuntime:
         has_tool_budget = events_since_user < self.max_tool_calls_per_turn
 
         messages = SessionManager.events_to_litellm_messages(conversation)
-        if not has_tool_budget:
+        # Phase 7.2: a forced summary turn (repeat limit hit) suppresses tools exactly
+        # like the per-turn budget brake, so the model must answer in prose and the
+        # loop terminates. _force_summary is one-shot.
+        force_summary = self._force_summary
+        self._force_summary = False
+        if force_summary:
+            messages.append({"role": "user", "content": REPEATED_TOOL_CALL_GUARDRAIL})
+        elif not has_tool_budget:
             messages.append({"role": "user", "content": TOOL_CALL_GUARDRAIL_INSTRUCTION})
 
-        tools = self.get_tools() if has_tool_budget else None
+        tools = self.get_tools() if (has_tool_budget and not force_summary) else None
         response = await acompletion(model=self.model_name, messages=messages, tools=tools)
         msg = response.choices[0].message
         tool_calls = msg.tool_calls
 
         if tool_calls:
+            # Phase 7.2: detect the model repeating the EXACT same call(s). On the Nth
+            # consecutive identical turn, drop this turn (don't add or execute it) and
+            # force a no-tools summary next turn, so a stuck loop ends cleanly.
+            sig = json.dumps(
+                [[tc.function.name, tc.function.arguments] for tc in tool_calls],
+                sort_keys=True,
+            )
+            self._repeat_count = self._repeat_count + 1 if sig == self._last_tool_sig else 1
+            self._last_tool_sig = sig
+            if self._repeat_count >= MAX_REPEATED_TOOL_CALLS:
+                self._repeat_count = 0
+                self._last_tool_sig = None
+                self._force_summary = True
+                return True   # next turn summarises with tools suppressed
+
             await self.session_manager.add_message(SessionEvent(
                 role="assistant",
                 parts=[

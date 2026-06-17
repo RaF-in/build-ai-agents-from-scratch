@@ -13,6 +13,9 @@ role runs in its own in_memory() session inside run_subagent.
 from __future__ import annotations
 
 import asyncio
+import os
+import time
+from datetime import datetime, timezone
 
 from rich import print
 
@@ -200,6 +203,7 @@ async def run_pipeline(
     context.workspace_dir = make_run_workspace()
     context.run_budget = RunBudget()
     context.run_semaphore = asyncio.Semaphore(config.breadth)
+    started_at = time.time()
     try:
         for phase in descriptor:
             if context.run_budget.exhausted():
@@ -207,4 +211,48 @@ async def run_pipeline(
             await PHASE_RUNNERS[phase](brief, config, context)
         return read_final_artifact(context.workspace_dir)
     finally:
-        schedule_workspace_cleanup(context.workspace_dir)
+        _log_run(brief, config, context, descriptor, started_at)   # 7.4 observability
+        schedule_workspace_cleanup(context.workspace_dir)           # 7.5 TTL sweep
+
+
+def _log_run(brief, config, context, descriptor, started_at) -> None:
+    """Phase 7.4: assemble + persist the per-run telemetry record. Best-effort —
+    never lets a logging error escape into the run's result."""
+    try:
+        from .run_log import write_run_log
+        from .text_tools import extract_sources
+
+        run_id = os.path.basename(context.workspace_dir or "") or "unknown"
+        report = read_artifact(context, "report.md")
+        spec = read_artifact(context, "spec.md")
+        sub_qs = [ln.strip() for ln in spec.splitlines() if ln.strip()[:1].isdigit()]
+
+        verdicts: list[dict] = []
+        try:
+            from .verdict_store import default_store
+            verdicts = [
+                {"round": v["round_index"], "passed": v["passed"],
+                 "weighted": v["weighted"], "scores": v["scores"]}
+                for v in default_store().recent(config.name)
+                if v["run_id"] == run_id
+            ]
+        except Exception:
+            pass
+
+        budget = context.run_budget
+        write_run_log({
+            "run_id": run_id,
+            "capability": config.name,
+            "brief": brief,
+            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "duration_s": round(time.time() - started_at, 2),
+            "phases": list(descriptor),
+            "sub_questions": sub_qs,
+            "tool_calls": budget.calls if budget else None,
+            "budget_exhausted": budget.exhausted() if budget else None,
+            "sources": extract_sources(report),
+            "verdicts": verdicts,
+            "produced_report": bool(report.strip()),
+        })
+    except Exception as exc:
+        print(f"[run_log] not written: {exc}")

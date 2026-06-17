@@ -6,7 +6,8 @@ import aiosqlite
 import asyncio
 import time
 import datetime
-from litellm import acompletion
+# Phase 7.3: compaction summarization goes through the same resilience wrapper.
+from llm_resilience import resilient_acompletion as acompletion
 
 class FcMetaData(BaseModel):
     name: str
