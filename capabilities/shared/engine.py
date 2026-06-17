@@ -104,13 +104,18 @@ async def run_generate(brief: str, config: CapabilityConfig, context: AgentConte
             f"report.md and edit it):\n\n{feedback}"
         )
     budget = context.run_budget
-    await spawn_role(
+    summary = await spawn_role(
         config.generator,
         task=task,
         context=context,
         max_tool_calls_per_turn=200,
         timeout_s=budget.max_wall_clock_s if budget else None,
     )
+    # The generator's final plain-text reply is its own one-line summary. Persist it
+    # so the entry tool can return a SHORT result (Phase 6 output contract) instead of
+    # dumping the whole report into the caller's context. Generic: any capability's
+    # generator returns a summary; the file name is engine-neutral.
+    write_artifact(context, "summary.md", summary)
 
 
 async def run_evaluate(brief: str, config: CapabilityConfig, context: AgentContext) -> None:

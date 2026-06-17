@@ -40,6 +40,7 @@ def build_research_config() -> CapabilityConfig:
     # reach is the GENERIC web layer — this config only references it.
     from agent_tools import ReadTool, WriteTool, EditTool
     from web.tools import DelegateWebSearchTool
+    from capabilities.shared.text_tools import CheckCitationsTool, CountWordsTool
 
     criteria = _criteria_block()
     # Phase 5.2: the calibrated few-shot exemplars this capability ships are loaded
@@ -60,7 +61,10 @@ def build_research_config() -> CapabilityConfig:
         # The generator plans + synthesizes; it fans out actual web search/fetch to
         # workers via DelegateWebSearchTool (Phase 3.3) so only compressed worker
         # summaries — never raw untrusted page content — enter its context.
-        tools=[*TODO_TOOLS, DelegateWebSearchTool, ReadTool, WriteTool, EditTool],
+        # CheckCitationsTool/CountWordsTool back the mandatory citation post-check
+        # (Phase 6); the generator runs them as a final todo before finishing.
+        tools=[*TODO_TOOLS, DelegateWebSearchTool, ReadTool, WriteTool, EditTool,
+               CheckCitationsTool, CountWordsTool],
         policy_factory=PlanExecutePolicy,
         fresh_todo_list=True,
     )

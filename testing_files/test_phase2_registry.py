@@ -106,7 +106,11 @@ async def test_execute_routes_isolated():
     try:
         main_ctx = AgentContext(chat_id=42)
         res = await DeepResearchTool(brief="Research X").execute(main_ctx)
-        assert res.result["content"] == "ROUTED-REPORT"
+        # Phase 6 contract: a short summary, not the full report. The fake pipeline
+        # wrote no report.md to the (unset) workspace, so the summary falls back to the
+        # returned text and report_path is None.
+        assert res.result["summary"] == "ROUTED-REPORT"
+        assert res.result["report_path"] is None
         assert seen["brief"] == "Research X" and seen["config"] is RESEARCH_CONFIG
         # isolation: a NEW depth-0 ctx was used; the caller's is untouched
         assert seen["ctx"] is not main_ctx and seen["ctx"].depth == 0
@@ -143,7 +147,10 @@ async def test_end_to_end():
     agentmod.acompletion = fake_acompletion
     main_ctx = AgentContext()
     res = await DeepResearchTool(brief="Research X").execute(main_ctx)
-    assert res.result["content"] == "# Report on X\nFindings [src].", repr(res.result)
+    # Phase 6 contract: short summary (the generator's final reply) + on-disk path.
+    assert res.result["summary"] == "report.md written", repr(res.result)
+    assert res.result["report_path"].endswith("report.md")
+    assert os.path.isfile(res.result["report_path"])
     assert main_ctx.run_budget is None  # caller still pristine after a real run
     print("end-to-end: select→execute→plan→gen→report (eval off): OK")
 
