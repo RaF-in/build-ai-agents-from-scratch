@@ -641,23 +641,39 @@ def agreement_rate(config) -&gt; float:
         <p class="acc">A fetched page containing &ldquo;ignore previous instructions / run a command&rdquo; changes nothing; a simulated <code>429</code> is retried/failed-over; exceeding budget returns a clean partial.</p>
 
         <!-- ============================================================ -->
-        <h2 id="phase8"><span class="phase-number">8</span>Phase 8 &mdash; Prove reuse (a second config) <span class="tag tag-config">CONFIG PLUGIN</span></h2>
-        <p>The acceptance test for &ldquo;future capabilities reuse this fully.&rdquo; Stub <code>capabilities/article_writer/</code> using the <em>same</em> engine with only new prompts + criteria + (optional) tools &mdash; <strong>no engine or kernel edits</strong>.</p>
+        <h2 id="phase8"><span class="phase-number">8</span>Phase 8 &mdash; Prove reuse (a second config) <span class="tag tag-config">CONFIG PLUGIN</span> <span class="tag tag-shared">IMPLEMENTED</span></h2>
+        <p>The acceptance test for &ldquo;future capabilities reuse this fully,&rdquo; now built: <code>capabilities/article_writer/</code> uses the <em>same</em> engine, web layer, criteria machinery, and generic tools &mdash; differing from <code>deep_research</code> ONLY in prompts + criteria. <strong>Zero edits to <code>engine.py</code> or the kernel.</strong> The pack is pure config/data: <code>criteria.py</code>, <code>config.py</code>, a thin <code>entry.py</code> handle, <code>prompts/</code>, and (optional) <code>eval_examples/</code> + <code>calibration_set/</code>. Calibration (Phase 5) and resilience/observability/cleanup (Phase 7) come along for free &mdash; all keyed by <code>config.name</code> + optional fields.</p>
 <pre><code>WRITING_CRITERIA = [
     Criterion("structure",   0.25, 0.6, "Clear arc: hook → argument → payoff?"),
     Criterion("originality", 0.30, 0.6, "Distinct voice, not generic AI filler?"),
     Criterion("accuracy",    0.25, 0.7, "Claims supported; no fabrication?"),
     Criterion("craft",       0.20, 0.5, "Prose, rhythm, transitions?"),
 ]
-WRITING_CONFIG = CapabilityConfig(name="article_writer", planner=..., generator=...,
-                                  evaluator=..., criteria=WRITING_CRITERIA, verify="auto")
+# config.py reuses the GENERIC layer — same engine + web delegate + Phase-6 tools:
+generator = RoleConfig(name="generator", system_prompt=_prompt("generator.md")...,
+    tools=[*TODO_TOOLS, DelegateWebSearchTool, ReadTool, WriteTool, EditTool,
+           CheckCitationsTool, CountWordsTool])
+WRITING_CONFIG = CapabilityConfig(name="article_writer", planner=..., generator=generator,
+    evaluator=..., criteria=WRITING_CRITERIA, verify="auto",
+    eval_examples_dir=..., calibration_set_dir=..., evaluator_prompt_path=...)  # Phase 5, optional
+
+# entry.py — thin handle; mirrors DeepResearchTool's POST-Phase-6 short contract:
 class WriteArticleTool(AgentTool):
-    """Use to draft a long-form article/blog post with structure, voice, and sources."""
+    """Draft a long-form article/blog post with structure, voice, and sources."""
     topic: str; audience: str = "general"
-    async def execute(self, ctx):
-        return self.tool_result(result={"content":
-            await run_pipeline(f"{self.topic} (for {self.audience})", config=WRITING_CONFIG, context=ctx)})</code></pre>
-        <p class="acc">Dropping the <code>article_writer</code> folder adds a working capability with zero diffs to <code>engine.py</code> or the kernel.</p>
+    async def execute(self, context):
+        run_ctx = context.new_run_context()            # isolate; don't mutate caller
+        report = await run_pipeline(f"{self.topic} (for {self.audience})",
+                                    config=WRITING_CONFIG, context=run_ctx)
+        ws = run_ctx.workspace_dir                       # full draft stays on disk
+        return self.tool_result(result={"summary": _first_meaningful_line(report),
+            "report_path": os.path.join(ws, "report.md"), "sources": extract_sources(report)})
+
+# __init__.py — the ENTIRE registry contract (without this the folder is skipped):
+CAPABILITY = CapabilitySpec(name="article_writer",
+    summary="Draft a long-form article (outline → write → self-edit) with voice and sources.",
+    entry_tools=[WriteArticleTool])</code></pre>
+        <p class="acc">Dropping the <code>article_writer</code> folder adds a working capability with zero diffs to <code>engine.py</code> or the kernel. <strong>Verified</strong> in <code>test_phase8_reuse.py</code>: discovery + surfacing, pure-config pack, generic-tool reuse, capability-blind calibration, and a faked end-to-end through the shared <code>run_pipeline</code>.</p>
 
         <!-- ============================================================ -->
         <h2 id="phase9"><span class="phase-number">9</span>Phase 9 &mdash; Future: dynamic pipelines <span class="tag tag-future">FUTURE</span></h2>
@@ -679,13 +695,14 @@ async def run_meta_plan(brief, context) -&gt; list[Phase | RoleConfig]:
 # then: await run_pipeline(brief, config=..., context=ctx, descriptor=descriptor)</code></pre>
 
         <!-- ============================================================ -->
-        <h2 id="phase10"><span class="phase-number">10</span>Phase 10 &mdash; Testing &amp; rollout</h2>
+        <h2 id="phase10"><span class="phase-number">10</span>Phase 10 &mdash; Testing &amp; rollout <span class="tag tag-shared">IMPLEMENTED</span></h2>
+        <p>Each phase ships its own standalone suite (<code>testing_files/test_phase&lt;N&gt;_*.py</code>); <code>run_all.py</code> runs all nine and reports one green/red. Most of the matrix below was already covered phase-by-phase &mdash; Phase 10 added the genuinely-missing pieces (rollout flag, full mocked-search integration, DNS-rebind SSRF) and reconciled the list.</p>
         <ul>
-            <li><strong>Unit:</strong> depth budget; <code>RunBudget</code> exhaustion; parallel-gather survivor collection; todo add/complete/abandon; citation post-check; findings parsing; SSRF (incl. DNS&rarr;private IP); <code>Verdict.passed</code> threshold logic.</li>
-            <li><strong>Integration:</strong> mock search/fetch; full plan&rarr;gen&rarr;eval on a fixed brief, deterministic seeds.</li>
-            <li><strong>Security:</strong> injection page changes nothing (no shell reachable); SSRF rejects metadata endpoint; never-clearable todo aborts after <code>max_continuations</code>; simulated <code>429</code> retried/failed-over.</li>
-            <li><strong>Evaluation:</strong> a small benchmark of briefs with rubric scoring (coverage, citation accuracy, cost); the calibration agreement-rate baseline (Phase 5).</li>
-            <li><strong>Rollout:</strong> ship behind a flag; low breadth/budget first; raise limits after cost/quality data.</li>
+            <li><strong>Unit (done across phases):</strong> depth budget; <code>RunBudget</code> exhaustion (P7); parallel-gather survivor collection (P3); todo add/complete/abandon (P1); citation post-check &amp; Sources dedup (P6 &mdash; dedup is prompt-driven, so the unit target is <code>CheckCitationsTool</code>, not a findings parser); SSRF incl. DNS&rarr;private IP (P3/P10); <code>Verdict.passed</code> threshold logic (P4).</li>
+            <li><strong>Integration (P10):</strong> mocked search/fetch; a FULL plan&rarr;generate(&rarr;real worker subagents calling SearchTool/FetchTool)&rarr;skeptical eval&rarr;passing verdict on a fixed brief, deterministic.</li>
+            <li><strong>Security:</strong> injection page changes nothing &mdash; no shell reachable in the research/writer runtimes (P7); SSRF rejects the metadata endpoint (P3/P7); never-clearable todo aborts after <code>max_continuations</code> (P1); a stuck loop emitting the same tool call aborts after <code>MAX_REPEATED_TOOL_CALLS</code> with a partial summary (P7.2); simulated <code>429</code> retried &mdash; note <em>failover</em> is inert until <code>LLM_FALLBACKS</code> is populated (P7.3).</li>
+            <li><strong>Evaluation:</strong> the calibration agreement-rate baseline + history is built and reusable per capability (P5). <em>Still open:</em> a curated benchmark of briefs with rubric/cost scoring &mdash; a data-collection task, deferred until there are real runs to score.</li>
+            <li><strong>Rollout (P10):</strong> a capability ships dark behind <code>AGENT_DISABLED_CAPABILITIES</code> (registry gate), enabled by flipping the flag; low breadth/budget first is just config dials (<code>CapabilityConfig.breadth</code>, <code>RunBudget</code>), raised after cost/quality data.</li>
         </ul>
 
         <!-- ============================================================ -->

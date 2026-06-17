@@ -14,6 +14,7 @@ handles, and tolerate a broken pack by skipping it instead of crashing.
 from __future__ import annotations
 
 import importlib
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,6 +25,13 @@ from tool_base import AgentTool
 CAPABILITY_ATTR = "CAPABILITY"
 # Subdirectories that are not capabilities themselves.
 _SKIP = {"shared", "__pycache__"}
+
+
+def _disabled_capabilities() -> set[str]:
+    """Phase 10 rollout gate: capability names listed in AGENT_DISABLED_CAPABILITIES
+    (comma-separated) are not discovered or surfaced — ship a new pack dark, then
+    flip the flag to enable it. Read per-discover so it can change without a restart."""
+    return {n.strip() for n in os.getenv("AGENT_DISABLED_CAPABILITIES", "").split(",") if n.strip()}
 
 
 @dataclass
@@ -70,11 +78,14 @@ class CapabilityRegistry:
         self._specs = {}
         if not self.root.is_dir():
             return
+        disabled = _disabled_capabilities()
         for entry in sorted(self.root.iterdir()):
             if not entry.is_dir() or entry.name in _SKIP or entry.name.startswith("_"):
                 continue
             if not (entry / "__init__.py").exists():
                 continue
+            if entry.name in disabled:
+                continue   # rollout flag: keep the pack fully dark (not even imported)
             modname = f"{self.package}.{entry.name}"
             try:
                 module = importlib.import_module(modname)

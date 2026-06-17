@@ -1,0 +1,8 @@
+{
+  "label": "crafted-pass",
+  "artifact": "# The Quiet Cost of X\nThe first time a team adopts X, nothing breaks. That's the trap [eng.example/x-postmortem].\n\n## The hook\nFor a quarter, velocity climbs and everyone celebrates. Then the second system lands, and the seams that X papered over start to tear [eng.example/x-postmortem].\n\n## The payoff\nX is not a mistake — it is a loan. Teams that name the interest early keep the speed; teams that don't pay it back with interest. Decide which one you are before the second system, not after.\n\n## Sources\n- eng.example/x-postmortem\n",
+  "expected": {
+    "passed": true,
+    "scores": {"structure": 0.8, "originality": 0.8, "accuracy": 0.7, "craft": 0.8}
+  }
+}

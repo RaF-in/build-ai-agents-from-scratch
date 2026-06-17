@@ -1,0 +1,8 @@
+{
+  "label": "filler-fail",
+  "artifact": "# Why X Matters\nIn today's fast-paced world, X is more important than ever. There are many things to consider when thinking about X. Companies large and small are paying attention. In conclusion, X is good and you should care about it.\n",
+  "expected": {
+    "passed": false,
+    "scores": {"structure": 0.3, "originality": 0.2, "accuracy": 0.5, "craft": 0.3}
+  }
+}
