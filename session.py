@@ -8,6 +8,7 @@ import time
 import datetime
 # Phase 7.3: compaction summarization goes through the same resilience wrapper.
 from llm_resilience import resilient_acompletion as acompletion
+import telemetry
 
 class FcMetaData(BaseModel):
     name: str
@@ -506,10 +507,7 @@ class SessionManager:
         # LITELLM SUMMARIZATION CALL
         # -------------------------------------------------
 
-        response = await acompletion(
-            model=self.model_name,
-
-            messages=[
+        summarization_messages = [
                 {
                     "role": "system",
 
@@ -543,55 +541,65 @@ Rules:
                         + mapped_conversation
                     ),
                 },
-            ],
+            ]
 
-            temperature=0.2,
-        )
+        # Phase 4.1: span over the compaction LLM call + persistence. The litellm
+        # summarization call nests under it automatically; summary size on exit.
+        with telemetry.span(
+            "session.compaction", **{"compaction.event_count": len(events)}
+        ) as comp:
+            response = await acompletion(
+                model=self.model_name,
+                messages=summarization_messages,
+                temperature=0.2,
+            )
 
-        summary = (
-            response
-            .choices[0]
-            .message
-            .content
-            .strip()
-        )
+            summary = (
+                response
+                .choices[0]
+                .message
+                .content
+                .strip()
+            )
 
-        print(
-            "[Memory] "
-            "Compaction Finished"
-        )
+            comp.set_attribute("compaction.summary_bytes", len(summary))
 
-        print(summary)
+            print(
+                "[Memory] "
+                "Compaction Finished"
+            )
 
-        # -------------------------------------------------
-        # SAVE MEMORY FILE
-        # -------------------------------------------------
+            print(summary)
 
-        self._append_summary_to_memory(
-            summary
-        )
+            # -------------------------------------------------
+            # SAVE MEMORY FILE
+            # -------------------------------------------------
 
-        # -------------------------------------------------
-        # CREATE SUMMARY EVENT
-        # -------------------------------------------------
+            self._append_summary_to_memory(
+                summary
+            )
 
-        summary_event = CompactionEvent(
-            parts=[TextPart(text=summary)]
-        )
+            # -------------------------------------------------
+            # CREATE SUMMARY EVENT
+            # -------------------------------------------------
 
-        # -------------------------------------------------
-        # SAVE TO DATABASE
-        # -------------------------------------------------
+            summary_event = CompactionEvent(
+                parts=[TextPart(text=summary)]
+            )
 
-        await self.add_message(
-            summary_event
-        )
+            # -------------------------------------------------
+            # SAVE TO DATABASE
+            # -------------------------------------------------
 
-        # -------------------------------------------------
-        # RETURN COMPACTED CONTEXT
-        # -------------------------------------------------
+            await self.add_message(
+                summary_event
+            )
 
-        return [summary_event]
+            # -------------------------------------------------
+            # RETURN COMPACTED CONTEXT
+            # -------------------------------------------------
+
+            return [summary_event]
 
     # =====================================================
     # CONVERT STORED EVENTS -> LITELLM

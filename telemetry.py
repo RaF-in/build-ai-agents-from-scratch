@@ -54,6 +54,7 @@ def configure_telemetry() -> bool:
         return ENABLED  # already configured, or no token => full no-op
     logfire.configure(
         service_name=os.getenv("OTEL_SERVICE_NAME", "ai-agent"),
+        service_version=os.getenv("AGENT_VERSION"),
         environment=os.getenv("AGENT_ENV", "dev"),
         console=False if os.getenv("TRACE_CONSOLE") == "0" else logfire.ConsoleOptions(verbose=False),
         scrubbing=logfire.ScrubbingOptions(
