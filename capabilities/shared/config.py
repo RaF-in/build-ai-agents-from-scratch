@@ -61,3 +61,13 @@ class CapabilityConfig:
     # the prompt-version log hashes it as the "instructions only" fingerprint. None on
     # capabilities whose evaluator prompt is not file-backed.
     evaluator_prompt_path: str | None = None
+
+    def telemetry_attributes(self) -> dict:
+        """Tracing attributes for this capability — one source of truth, dotted
+        keys. Stamped onto the ``capability.pipeline`` span (Phase 3.1)."""
+        return {
+            "capability.name": self.name,
+            "capability.breadth": self.breadth,
+            "capability.max_rounds": self.max_rounds,
+            "capability.verify": self.verify,
+        }

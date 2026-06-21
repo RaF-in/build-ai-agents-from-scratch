@@ -2,6 +2,7 @@ import asyncio
 from cron.cron import CronService
 from telegram_server import setup as setup_telegram, get_runtime, bot, app
 import agent
+import telemetry
 from tool_base import AgentContext
 from context.context import prepare_system_message
 from context.memory import MemoryManager
@@ -42,6 +43,13 @@ async def process_cron_messages(cron_service):
 
 
 async def main():
+    # Phase 1.1: configure telemetry once, at startup (never at import time, so
+    # tests stay no-op). No-op without LOGFIRE_TOKEN.
+    telemetry.configure_telemetry()
+    # Phase 1.3: auto-instrument the FastAPI webhook server so each HTTP request
+    # parents the agent.request subtree.
+    telemetry.instrument_fastapi(app)
+
     cron_queue = asyncio.Queue()
     cron_service = CronService(queue=cron_queue)
 

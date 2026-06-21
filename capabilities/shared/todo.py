@@ -48,6 +48,10 @@ class TodoList(BaseModel):
     def has_open(self) -> bool:
         return any(t.status in _OPEN for t in self.items)
 
+    def count_open(self) -> int:
+        """Number of still-open todos — surfaced as an agent.todos.open span attr."""
+        return sum(1 for t in self.items if t.status in _OPEN)
+
     def get(self, todo_id: int) -> Todo | None:
         return next((t for t in self.items if t.id == todo_id), None)
 

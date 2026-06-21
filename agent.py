@@ -36,6 +36,7 @@ from session import (
 )
 from slash_commands import CLIOutputHandler, parse_and_execute
 from skills import skill_manager
+import telemetry
 
 TOOL_CALL_GUARDRAIL_INSTRUCTION = (
     "You have used a large number of tool calls. "
@@ -387,11 +388,15 @@ async def _cli_loop(runtime):
 
 async def start_cli(cron_service):
     global cli_runtime
+    # Phase 1.1: idempotent — safe even when main.py already configured at startup.
+    telemetry.configure_telemetry()
     runtime = _create_cli_runtime(cron_service=cron_service)
     cli_runtime = runtime
     await _cli_loop(runtime)
 
 async def main():
+    # Phase 1.1: standalone `python agent.py` entry — configure once at startup.
+    telemetry.configure_telemetry()
     runtime = _create_cli_runtime()
     await _cli_loop(runtime)
 

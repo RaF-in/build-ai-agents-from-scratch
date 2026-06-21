@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import asyncio
 import json
+import os
 import time
 from pydantic import BaseModel
 
@@ -38,6 +39,19 @@ class RunBudget:
             self.calls >= self.max_tool_calls
             or (time.time() - self.started_at) > self.max_wall_clock_s
         )
+
+    def telemetry_attributes(self) -> dict[str, Any]:
+        """Tracing attributes for this budget — one source of truth, dotted keys.
+
+        Composed into ``AgentContext.telemetry_attributes`` so every span that
+        carries the run context also reports its budget state.
+        """
+        return {
+            "budget.calls": self.calls,
+            "budget.max_calls": self.max_tool_calls,
+            "budget.elapsed_s": round(time.time() - self.started_at, 1),
+            "budget.exhausted": self.exhausted(),
+        }
 
 
 @runtime_checkable
@@ -128,6 +142,28 @@ class AgentContext:
         # own (workers stay DefaultPolicy), so it is deliberately absent from
         # child_context(). None => DefaultPolicy => today's exact behavior.
         self.policy = policy
+
+    def telemetry_attributes(self) -> dict[str, Any]:
+        """Tracing attributes for this context — the one source of truth, dotted
+        namespaced keys. Composes ``RunBudget.telemetry_attributes`` so a span
+        only ever calls ``context.telemetry_attributes()``. Fields that are unset
+        on the main agent (chat_id, workspace, run_budget, todos) are omitted so
+        ordinary Q&A spans stay clean.
+        """
+        attrs: dict[str, Any] = {
+            "agent.depth": self.depth,
+            "agent.max_depth": self.max_depth,
+            "agent.policy": type(self.policy).__name__ if self.policy else "DefaultPolicy",
+        }
+        if self.chat_id is not None:
+            attrs["agent.chat_id"] = self.chat_id
+        if self.workspace_dir:
+            attrs["agent.workspace"] = os.path.basename(self.workspace_dir)
+        if self.run_budget:
+            attrs.update(self.run_budget.telemetry_attributes())  # compose
+        if self.todo_list is not None and hasattr(self.todo_list, "count_open"):
+            attrs["agent.todos.open"] = self.todo_list.count_open()
+        return attrs
 
     async def send_message(self, text: str) -> None:
         if not self.telegram_client or not self.chat_id:

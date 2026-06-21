@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production-Grade Logfire Tracing for the AI Agent</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --panel2: #1d2130; --border: #2a2f40;
+    --text: #d7dbe6; --muted: #8a91a6; --accent: #7c9cff; --accent2: #58d6a8;
+    --warn: #ffb454; --err: #ff6b6b; --code-bg: #11141d; --phase: #b292ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 30px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -.02em; }
+  h2 { font-size: 22px; margin: 46px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); letter-spacing: -.01em; }
+  h2 .pnum { color: var(--phase); }
+  h3 { font-size: 16.5px; margin: 26px 0 10px; color: var(--accent); }
+  h3 .snum { color: var(--muted); font-weight: 600; }
+  p { margin: 12px 0; }
+  .sub { color: var(--muted); margin-top: 0; }
+  a { color: var(--accent); }
+  code {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 6px; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    font-size: 13.5px; color: #e6e9f2;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 12.8px; line-height: 1.55;
+    font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; color: #cdd3e2;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  .cm { color: #6f7891; }       /* comment */
+  .kw { color: #c891ff; }       /* keyword */
+  .st { color: #9ae6b4; }       /* string */
+  .fn { color: #7c9cff; }       /* function/name */
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 18px 20px; margin: 18px 0;
+  }
+  .phase {
+    background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--phase);
+    border-radius: 12px; padding: 4px 22px 18px; margin: 22px 0;
+  }
+  .callout {
+    background: var(--panel2); border-left: 3px solid var(--accent); border-radius: 8px;
+    padding: 14px 18px; margin: 18px 0;
+  }
+  .callout.good { border-left-color: var(--accent2); }
+  .callout.warn { border-left-color: var(--warn); }
+  .tag {
+    display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 20px;
+    background: var(--panel2); border: 1px solid var(--border); color: var(--muted); margin-right: 6px;
+  }
+  .file { font-size: 12.5px; color: var(--muted); margin: 2px 0 8px; }
+  .file code { font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: none; }
+  td code { font-size: 12.5px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Production-Grade Logfire Tracing for the AI Agent</h1>
+  <p class="sub">OpenTelemetry traces + lightweight metrics, visible in the Logfire UI and console &mdash; organized into phases.</p>
+  <div>
+    <span class="tag">Logfire / OpenTelemetry</span>
+    <span class="tag">litellm auto-instrumentation</span>
+    <span class="tag">Traces + metrics</span>
+    <span class="tag">Token-gated &amp; no-op safe</span>
+    <span class="tag">telemetry_attributes() on domain objects</span>
+  </div>
+
+  <h2>Context</h2>
+  <p>
+    The agent runs a deep, mostly-invisible runtime: a turn loop that calls an LLM, dispatches tools,
+    spawns sub-agents, and runs a Planner&rarr;Generator&rarr;Evaluator (PGE) capability pipeline with
+    parallel worker fan-out &mdash; often concurrently. Today the only visibility is <code>rich</code>
+    prints and an ad-hoc per-run JSON log. When a run is slow, expensive, or wrong, there is no
+    navigable, timed record of <em>what happened, in what order, how long it took, and with what data</em>.
+  </p>
+  <p>
+    This plan introduces <strong>Logfire (OpenTelemetry traces + lightweight metrics)</strong> as a
+    first-class observability layer: a clean span tree in the <strong>Logfire UI</strong> and a
+    <strong>concise console</strong>, with token/cost/error <strong>metrics</strong>, secret scrubbing,
+    and a strict &ldquo;telemetry must never break the app&rdquo; guarantee.
+  </p>
+
+  <div class="callout good">
+    <strong>Decisions confirmed with the user</strong>
+    <ul>
+      <li><strong>Payload detail:</strong> summaries/metadata + short previews by default; full payloads only when <code>TRACE_CAPTURE_CONTENT=1</code>.</li>
+      <li><strong>Traces + lightweight metrics</strong> (tokens, cost, tool errors, subagent failures).</li>
+      <li><strong>Concise console</strong> spans alongside existing <code>rich</code> prints.</li>
+      <li><strong>Token-gated, env-driven:</strong> configure once at startup only if <code>LOGFIRE_TOKEN</code> is set; otherwise a full no-op.</li>
+    </ul>
+  </div>
+
+  <div class="callout warn">
+    <strong>What changed in this revision</strong>
+    <ul>
+      <li>The plan is now broken into <strong>6 phases</strong> with sub-phases and a code sketch on each.</li>
+      <li>Adopted the tutorial's pattern: a <code>telemetry_attributes()</code> method <strong>on the
+        domain objects themselves</strong> (<code>AgentContext</code>, <code>RunBudget</code>,
+        <code>CapabilityConfig</code>) &mdash; <em>one source of truth, dotted namespaced keys</em>.
+        <code>telemetry.py</code> only composes/merges them; it no longer owns a separate
+        <code>ctx_attributes()</code> helper.</li>
+    </ul>
+  </div>
+
+  <h2>Target span tree</h2>
+  <pre><code>agent.request               <span class="cm">(one user message &rarr; completion; root for CLI/Telegram/cron)</span>
+&#9492;&#9472; agent.turn               <span class="cm">(one AgentRuntime.run() call: 1 LLM call + its tool batch)</span>
+   &#9500;&#9472; litellm &lt;model&gt;       <span class="cm">(auto: litellm's native logfire callback &mdash; tokens/latency/cost)</span>
+   &#9492;&#9472; agent.tool {name}     <span class="cm">(one run_tool dispatch)</span>
+      &#9492;&#9472; capability.pipeline {name}        <span class="cm">(entry tool &rarr; run_pipeline)</span>
+         &#9500;&#9472; capability.phase plan  &rarr; agent.subagent role:planner &rarr; agent.turn&hellip;
+         &#9500;&#9472; capability.phase gen   &rarr; agent.subagent role:generator
+         &#9474;     &#9492;&#9472; agent.tool DelegateWebSearchTool
+         &#9474;        &#9492;&#9472; capability.delegate (N workers)
+         &#9474;           &#9492;&#9472; agent.subagent worker  (&times;N, concurrent)
+         &#9492;&#9472; capability.phase eval  &rarr; agent.subagent role:evaluator
+   (also nested where relevant): session.compaction</code></pre>
+  <p class="meta">
+    Parentage is automatic: every boundary is an <code>async</code>/<code>await</code> call and
+    <code>asyncio.gather</code> copies the OTel context into each task.
+  </p>
+
+
+  <h2>Tutorial principles &mdash; where each is honored</h2>
+  <table>
+    <thead><tr><th>Principle</th><th>How the plan respects it</th></tr></thead>
+    <tbody>
+      <tr><td><strong>2.</strong> <code>telemetry_attributes()</code> on domain objects, dotted keys</td><td>Phase 0.2 &mdash; on <code>RunBudget</code>, <code>AgentContext</code> (composes budget), <code>CapabilityConfig</code></td></tr>
+      <tr><td><strong>3.</strong> Nest spans, outermost first</td><td><code>agent.request</code> &rarr; <code>agent.turn</code> &rarr; litellm &rarr; <code>agent.tool</code>; tools dispatch inside <code>run()</code> so nesting is automatic (Phases 2&ndash;3)</td></tr>
+      <tr><td><strong>4.</strong> Auto-instrument third-party calls</td><td>Phase 1.2 litellm callback (no hand-instrumented HTTP) + 1.3 FastAPI; the token <em>metric</em> reads <code>response.usage</code> that litellm already returns, so it doesn't re-instrument the call</td></tr>
+      <tr><td><strong>5.</strong> Summaries by default, full when debugging</td><td><code>telemetry.payload()</code> + <code>TRACE_CAPTURE_CONTENT</code> (Phase 0.3, used in 2.3 / 3.3)</td></tr>
+      <tr><td><strong>6.</strong> Status as attribute, exceptions as span errors</td><td>Recoverable failures &rarr; <code>tool.status</code>/<code>subagent.status="error"</code> + a metric. Real crashes are <strong>never wrapped in try/except just to swallow</strong> &mdash; they propagate and Logfire auto-marks the span errored. (<code>run_tool</code> keeps its existing catch&rarr;<code>ToolResult(error=True)</code>, which is exactly an "expected/recoverable" status.)</td></tr>
+      <tr><td><strong>Rule 1.</strong> Configure once at startup</td><td>0.3 idempotent (<code>ENABLED</code> guard) + 1.1 single call at entry</td></tr>
+      <tr><td><strong>Rule 2.</strong> Span = one timed op; parentage automatic</td><td>Every span wraps one <code>await</code> boundary; <code>asyncio.gather</code> copies context for workers</td></tr>
+      <tr><td><strong>Rule 3.</strong> Namespace + centralize attributes</td><td>Dotted keys defined once on the domain objects; <code>telemetry.py</code> composes</td></tr>
+      <tr><td><strong>Rule 4.</strong> Never break the app (if-token-present)</td><td>Token gate + <code>_NullSpan</code> + no-op recorders &mdash; identical behavior with no token</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ===================== PHASE 0 ===================== -->
+  <h2><span class="pnum">Phase 0</span> &mdash; Foundations: dependency, domain attributes, telemetry module</h2>
+  <p>Everything downstream depends on this. No spans are emitted yet; we lay the source-of-truth and the safe wrappers.</p>
+
+  <div class="phase">
+    <h3><span class="snum">0.1</span> Add the dependency</h3>
+    <p class="file"><code>pyproject.toml</code> &middot; install via <code>uv add 'logfire[fastapi]'</code></p>
+    <pre><code><span class="cm"># pyproject.toml &rarr; [project].dependencies</span>
+"logfire[fastapi]&gt;=3",   <span class="cm"># core SDK + FastAPI extra; litellm already ships a logfire callback</span></code></pre>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">0.2</span> <code>telemetry_attributes()</code> on the domain objects <span class="meta">(the source of truth)</span></h3>
+    <p class="file"><code>tool_base.py</code> (RunBudget, AgentContext) and <code>capabilities/shared/config.py</code> (CapabilityConfig)</p>
+    <p>
+      Each domain object knows how to describe itself with <strong>dotted, namespaced keys</strong>.
+      This is the single place a key like <code>agent.depth</code> or <code>budget.exhausted</code> is
+      defined; spans never hand-build attribute dicts.
+    </p>
+    <pre><code><span class="cm"># tool_base.py</span>
+<span class="kw">class</span> <span class="fn">RunBudget</span>:
+    <span class="kw">def</span> <span class="fn">telemetry_attributes</span>(self) -&gt; dict[str, Any]:
+        <span class="kw">return</span> {
+            <span class="st">"budget.calls"</span>: self.calls,
+            <span class="st">"budget.max_calls"</span>: self.max_tool_calls,
+            <span class="st">"budget.elapsed_s"</span>: round(time.time() - self.started_at, 1),
+            <span class="st">"budget.exhausted"</span>: self.exhausted(),
+        }
+
+<span class="kw">class</span> <span class="fn">AgentContext</span>:
+    <span class="kw">def</span> <span class="fn">telemetry_attributes</span>(self) -&gt; dict[str, Any]:
+        attrs = {
+            <span class="st">"agent.depth"</span>: self.depth,
+            <span class="st">"agent.max_depth"</span>: self.max_depth,
+            <span class="st">"agent.policy"</span>: type(self.policy).__name__ <span class="kw">if</span> self.policy <span class="kw">else</span> <span class="st">"DefaultPolicy"</span>,
+        }
+        <span class="kw">if</span> self.chat_id <span class="kw">is not</span> <span class="kw">None</span>: attrs[<span class="st">"agent.chat_id"</span>] = self.chat_id
+        <span class="kw">if</span> self.workspace_dir:   attrs[<span class="st">"agent.workspace"</span>] = os.path.basename(self.workspace_dir)
+        <span class="kw">if</span> self.run_budget:      attrs.update(self.run_budget.telemetry_attributes())  <span class="cm"># compose</span>
+        <span class="kw">if</span> self.todo_list <span class="kw">and</span> hasattr(self.todo_list, <span class="st">"count_open"</span>):
+            attrs[<span class="st">"agent.todos.open"</span>] = self.todo_list.count_open()
+        <span class="kw">return</span> attrs</code></pre>
+    <pre><code><span class="cm"># capabilities/shared/config.py</span>
+<span class="kw">class</span> <span class="fn">CapabilityConfig</span>:
+    <span class="kw">def</span> <span class="fn">telemetry_attributes</span>(self) -&gt; dict[str, Any]:
+        <span class="kw">return</span> {
+            <span class="st">"capability.name"</span>: self.name,      <span class="st">"capability.breadth"</span>: self.breadth,
+            <span class="st">"capability.max_rounds"</span>: self.max_rounds, <span class="st">"capability.verify"</span>: self.verify,
+        }</code></pre>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">0.3</span> The <code>telemetry.py</code> module <span class="meta">(config, safe span wrapper, payload gating, metrics)</span></h3>
+    <p class="file"><code>telemetry.py</code> <em>(new)</em></p>
+    <pre><code><span class="cm"># telemetry.py</span>
+<span class="kw">import</span> os, json, contextlib, logfire
+
+ENABLED = <span class="kw">False</span>
+CAPTURE_CONTENT = <span class="kw">False</span>
+_M = {}  <span class="cm"># metric instruments</span>
+
+<span class="kw">class</span> <span class="fn">_NullSpan</span>:                       <span class="cm"># so call sites can always .set_attribute safely</span>
+    <span class="kw">def</span> <span class="fn">set_attribute</span>(self, *a, **k): <span class="kw">pass</span>
+    <span class="kw">def</span> <span class="fn">set_attributes</span>(self, *a, **k): <span class="kw">pass</span>
+
+<span class="kw">def</span> <span class="fn">configure_telemetry</span>() -&gt; bool:        <span class="cm"># idempotent; call ONCE at startup</span>
+    <span class="kw">global</span> ENABLED, CAPTURE_CONTENT
+    <span class="kw">if</span> ENABLED <span class="kw">or not</span> os.getenv(<span class="st">"LOGFIRE_TOKEN"</span>):
+        <span class="kw">return</span> ENABLED                       <span class="cm"># no token =&gt; full no-op (CI/tests/local clean)</span>
+    logfire.configure(
+        service_name=os.getenv(<span class="st">"OTEL_SERVICE_NAME"</span>, <span class="st">"ai-agent"</span>),
+        environment=os.getenv(<span class="st">"AGENT_ENV"</span>, <span class="st">"dev"</span>),
+        console=<span class="kw">False</span> <span class="kw">if</span> os.getenv(<span class="st">"TRACE_CONSOLE"</span>) == <span class="st">"0"</span> <span class="kw">else</span> logfire.ConsoleOptions(verbose=<span class="kw">False</span>),
+        scrubbing=logfire.ScrubbingOptions(extra_patterns=[<span class="st">"api_key"</span>, <span class="st">"telegram"</span>, <span class="st">"tavily"</span>, <span class="st">"groq"</span>]),
+    )
+    <span class="kw">import</span> litellm; litellm.callbacks = [<span class="st">"logfire"</span>]   <span class="cm"># auto-spans for every LLM call</span>
+    _M[<span class="st">"tool_errors"</span>] = logfire.metric_counter(<span class="st">"tool.errors"</span>)
+    _M[<span class="st">"subagent_failures"</span>] = logfire.metric_counter(<span class="st">"subagent.failures"</span>)
+    _M[<span class="st">"llm_tokens"</span>] = logfire.metric_counter(<span class="st">"llm.tokens"</span>)
+    CAPTURE_CONTENT = os.getenv(<span class="st">"TRACE_CAPTURE_CONTENT"</span>) == <span class="st">"1"</span>
+    ENABLED = <span class="kw">True</span>
+    <span class="kw">return</span> <span class="kw">True</span>
+
+<span class="kw">def</span> <span class="fn">span</span>(name: str, **attrs):                <span class="cm"># the ONLY way call sites open a span</span>
+    <span class="kw">return</span> logfire.span(name, **attrs) <span class="kw">if</span> ENABLED <span class="kw">else</span> contextlib.nullcontext(_NullSpan())
+
+<span class="kw">def</span> <span class="fn">payload</span>(key: str, value) -&gt; dict:        <span class="cm"># summaries by default, full only when CAPTURE_CONTENT</span>
+    s = value <span class="kw">if</span> isinstance(value, str) <span class="kw">else</span> json.dumps(value, default=str)
+    <span class="kw">if</span> CAPTURE_CONTENT: <span class="kw">return</span> {key: s}
+    <span class="kw">return</span> {f<span class="st">"{key}_bytes"</span>: len(s), f<span class="st">"{key}_preview"</span>: s[:200]}
+
+<span class="kw">def</span> <span class="fn">record_tool_error</span>(name): ENABLED <span class="kw">and</span> _M[<span class="st">"tool_errors"</span>].add(1, {<span class="st">"tool"</span>: name})
+<span class="kw">def</span> <span class="fn">record_subagent_failure</span>(name, status): ENABLED <span class="kw">and</span> _M[<span class="st">"subagent_failures"</span>].add(1, {<span class="st">"role"</span>: name, <span class="st">"status"</span>: status})
+<span class="kw">def</span> <span class="fn">record_tokens</span>(usage):                  <span class="cm"># token metric from data litellm already returned (point 4 safe)</span>
+    <span class="kw">if not</span> (ENABLED <span class="kw">and</span> usage): <span class="kw">return</span>
+    _M[<span class="st">"llm_tokens"</span>].add(getattr(usage, <span class="st">"prompt_tokens"</span>, 0), {<span class="st">"kind"</span>: <span class="st">"input"</span>})
+    _M[<span class="st">"llm_tokens"</span>].add(getattr(usage, <span class="st">"completion_tokens"</span>, 0), {<span class="st">"kind"</span>: <span class="st">"output"</span>})
+<span class="kw">def</span> <span class="fn">instrument_fastapi</span>(app): ENABLED <span class="kw">and</span> logfire.instrument_fastapi(app)</code></pre>
+    <div class="callout">
+      <strong>Why <code>_NullSpan</code> matters:</strong> when telemetry is off, <code>span()</code> still
+      yields an object with no-op <code>set_attribute()</code>, so <code>with telemetry.span(...) as s:
+      s.set_attribute(...)</code> works identically whether or not a token is present. This is the
+      &ldquo;telemetry must never break the app&rdquo; rule, enforced structurally.
+    </div>
+  </div>
+
+
+  <!-- ===================== PHASE 1 ===================== -->
+  <h2><span class="pnum">Phase 1</span> &mdash; Startup &amp; auto-instrumentation</h2>
+  <p>Turn telemetry on at every entry point and let third parties self-instrument.</p>
+
+  <div class="phase">
+    <h3><span class="snum">1.1</span> Configure once at each entry point</h3>
+    <p class="file"><code>main.py:main()</code> (first line) and <code>agent.py:main()/start_cli()</code></p>
+    <pre><code><span class="cm"># main.py</span>
+<span class="kw">import</span> telemetry
+<span class="kw">async def</span> <span class="fn">main</span>():
+    telemetry.configure_telemetry()        <span class="cm"># BEFORE any service/task is created</span>
+    ...
+    telemetry.instrument_fastapi(app)      <span class="cm"># 1.3 &mdash; once app is imported</span></code></pre>
+    <p class="meta">Not at import time &mdash; tests import these modules and must stay no-op (token gate already guarantees this).</p>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">1.2</span> LLM auto-instrumentation</h3>
+    <p class="file">Centralized in <code>configure_telemetry()</code> (0.3): <code>litellm.callbacks = ["logfire"]</code></p>
+    <p>
+      Covers the single LLM chokepoint <code>resilient_acompletion</code> (<code>llm_resilience.py:39</code>)
+      &mdash; every turn, every role/worker, and <code>session.generate_summary</code>. <strong>No edit to
+      <code>llm_resilience.py</code>.</strong> Emits a <code>litellm &lt;model&gt;</code> span with
+      model/latency/tokens/cost, nested under the active <code>agent.turn</code>.
+    </p>
+    <div class="callout warn">
+      <strong>Fallback:</strong> if litellm's callback nests poorly in practice, replace it with an explicit
+      <code>agent.llm_call</code> span around <code>resilient_acompletion</code> and read tokens from
+      <code>response.usage</code> (set <code>llm.tokens</code> attrs + metric there).
+    </div>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">1.3</span> FastAPI instrumentation</h3>
+    <p class="file"><code>main.py</code> after app import (call shown in 1.1)</p>
+    <p><code>telemetry.instrument_fastapi(app)</code> gives an HTTP span per Telegram webhook that parents the <code>agent.request</code> subtree.</p>
+  </div>
+
+
+  <!-- ===================== PHASE 2 ===================== -->
+  <h2><span class="pnum">Phase 2</span> &mdash; Core kernel spans</h2>
+  <p>The single-agent path: request &rarr; turn &rarr; tool. This alone makes ordinary Q&amp;A fully traceable.</p>
+
+  <div class="phase">
+    <h3><span class="snum">2.1</span> <code>agent.request</code> &mdash; one helper, three callers</h3>
+    <p class="file">New helper in <code>agent.py</code>; used by <code>_cli_loop</code>, <code>telegram_server.py</code> webhook, <code>main.py:process_cron_messages</code></p>
+    <pre><code><span class="cm"># agent.py &mdash; replaces the 3 duplicated run/while-has_more loops</span>
+<span class="kw">async def</span> <span class="fn">run_to_completion</span>(runtime, user_text, sys_prompt, *, channel):
+    <span class="kw">with</span> telemetry.span(<span class="st">"agent.request"</span>,
+                        **{<span class="st">"agent.channel"</span>: channel, <span class="st">"agent.model"</span>: runtime.model_name},
+                        **runtime.context.telemetry_attributes()):     <span class="cm"># &larr; source of truth</span>
+        has_more = <span class="kw">await</span> runtime.run(user_text=user_text, sys_prompt=sys_prompt)
+        <span class="kw">while</span> has_more:
+            has_more = <span class="kw">await</span> runtime.run(user_text=<span class="kw">None</span>, sys_prompt=<span class="kw">None</span>)</code></pre>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">2.2</span> <code>agent.turn</code> in <code>AgentRuntime.run()</code></h3>
+    <p class="file"><code>agent.py:175</code></p>
+    <pre><code><span class="kw">async def</span> <span class="fn">run</span>(self, user_text, sys_prompt) -&gt; bool:
+    <span class="kw">with</span> telemetry.span(<span class="st">"agent.turn"</span>,
+                        **self.context.telemetry_attributes(),
+                        **{<span class="st">"agent.model"</span>: self.model_name,
+                           <span class="st">"agent.turn.is_user_turn"</span>: user_text <span class="kw">is not</span> <span class="kw">None</span>}) <span class="kw">as</span> turn:
+        ...
+        response = <span class="kw">await</span> acompletion(model=self.model_name, messages=messages, tools=tools)  <span class="cm"># litellm span nests here</span>
+        telemetry.record_tokens(getattr(response, <span class="st">"usage"</span>, <span class="kw">None</span>))   <span class="cm"># token metric (point 4: no hand-instrumented HTTP)</span>
+        ...
+        turn.set_attribute(<span class="st">"agent.turn.tool_calls"</span>, len(tool_calls <span class="kw">or</span> []))
+        ...  <span class="cm"># existing logic unchanged; just wrapped</span></code></pre>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">2.3</span> <code>agent.tool {name}</code> + tool-error metric in <code>run_tool()</code></h3>
+    <p class="file"><code>agent.py:292</code></p>
+    <pre><code><span class="kw">async def</span> <span class="fn">run_tool</span>(self, tool_name, args) -&gt; ToolResult:
+    <span class="kw">with</span> telemetry.span(f<span class="st">"agent.tool {tool_name}"</span>,
+                        **{<span class="st">"tool.name"</span>: tool_name, <span class="st">"agent.depth"</span>: self.context.depth},
+                        **telemetry.payload(<span class="st">"tool.args"</span>, args)) <span class="kw">as</span> ts:
+        result = ...                                  <span class="cm"># existing dispatch unchanged</span>
+        ts.set_attributes({<span class="st">"tool.status"</span>: <span class="st">"error"</span> <span class="kw">if</span> result.error <span class="kw">else</span> <span class="st">"ok"</span>,
+                           **telemetry.payload(<span class="st">"tool.result"</span>, result.result)})
+        <span class="kw">if</span> result.error: telemetry.record_tool_error(tool_name)   <span class="cm"># status as attr, metric for aggregation</span>
+        <span class="kw">return</span> result</code></pre>
+    <p class="meta">Existing <code>on_tool_result</code>/<code>on_model_response</code> hooks stay for console UX &mdash; telemetry lives in the kernel so it's uniform across CLI/Telegram/cron.</p>
+  </div>
+
+
+  <!-- ===================== PHASE 3 ===================== -->
+  <h2><span class="pnum">Phase 3</span> &mdash; Multi-agent &amp; capability spans</h2>
+  <p>The PGE pipeline, sub-agents, and parallel fan-out &mdash; the part that is impossible to debug today.</p>
+
+  <div class="phase">
+    <h3><span class="snum">3.1</span> <code>capability.pipeline {name}</code></h3>
+    <p class="file"><code>capabilities/shared/engine.py:186</code> (<code>run_pipeline</code>)</p>
+    <pre><code><span class="kw">with</span> telemetry.span(f<span class="st">"capability.pipeline {config.name}"</span>,
+                    **config.telemetry_attributes(),
+                    **{<span class="st">"capability.descriptor"</span>: <span class="st">","</span>.join(descriptor)}) <span class="kw">as</span> pipe:
+    <span class="kw">for</span> phase <span class="kw">in</span> descriptor:
+        <span class="kw">if</span> context.run_budget.exhausted(): <span class="kw">break</span>
+        ...  <span class="cm"># 3.2 wraps each phase</span>
+    report = read_final_artifact(context.workspace_dir)
+    pipe.set_attributes({**context.run_budget.telemetry_attributes(),
+                         <span class="st">"capability.produced_report"</span>: bool(report.strip())})</code></pre>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">3.2</span> <code>capability.phase {phase}</code></h3>
+    <p class="file"><code>engine.py:208</code> (the descriptor loop)</p>
+    <pre><code><span class="kw">for</span> phase <span class="kw">in</span> descriptor:
+    <span class="kw">if</span> context.run_budget.exhausted(): <span class="kw">break</span>
+    <span class="kw">with</span> telemetry.span(f<span class="st">"capability.phase {phase}"</span>):
+        <span class="kw">await</span> PHASE_RUNNERS[phase](brief, config, context)</code></pre>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">3.3</span> <code>agent.subagent {role}</code> + failure metric</h3>
+    <p class="file"><code>subagent_tools.py:43</code> (<code>run_subagent</code>)</p>
+    <pre><code><span class="kw">with</span> telemetry.span(f<span class="st">"agent.subagent {result_name}"</span>,
+                    **{<span class="st">"subagent.name"</span>: result_name, <span class="st">"agent.depth"</span>: context.depth},
+                    **telemetry.payload(<span class="st">"subagent.task"</span>, task)) <span class="kw">as</span> sp:
+    ...  <span class="cm"># existing retry / timeout / concurrency loop unchanged</span>
+    sp.set_attributes({<span class="st">"subagent.status"</span>: status, <span class="st">"subagent.attempts"</span>: run.attempts})
+    <span class="kw">if</span> status != <span class="st">"completed"</span>: telemetry.record_subagent_failure(result_name, status)</code></pre>
+    <p class="meta">The child's <code>agent.turn</code> spans (driven by <code>_run_child</code>) nest under this automatically.</p>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">3.4</span> <code>capability.delegate</code> &mdash; parallel fan-out</h3>
+    <p class="file"><code>subagent_tools.py:213</code> (<code>delegate_to_workers</code>)</p>
+    <pre><code><span class="kw">with</span> telemetry.span(<span class="st">"capability.delegate"</span>,
+                    **{<span class="st">"delegate.name"</span>: result_name, <span class="st">"delegate.task_count"</span>: len(tasks)}) <span class="kw">as</span> dl:
+    results = <span class="kw">await</span> asyncio.gather(*[one(t) <span class="kw">for</span> t <span class="kw">in</span> tasks])   <span class="cm"># each worker's subagent span nests here</span>
+    dl.set_attributes({<span class="st">"delegate.ok_count"</span>: sum(r[<span class="st">"ok"</span>] <span class="kw">for</span> r <span class="kw">in</span> results),
+                       <span class="st">"delegate.failed_count"</span>: sum(<span class="kw">not</span> r[<span class="st">"ok"</span>] <span class="kw">for</span> r <span class="kw">in</span> results)})
+    <span class="kw">return</span> results</code></pre>
+  </div>
+
+
+  <!-- ===================== PHASE 4 ===================== -->
+  <h2><span class="pnum">Phase 4</span> &mdash; Session lifecycle spans</h2>
+  <div class="phase">
+    <h3><span class="snum">4.1</span> <code>session.compaction</code></h3>
+    <p class="file"><code>session.py</code> (<code>SessionManager.generate_summary</code>, ~line 469)</p>
+    <pre><code><span class="kw">with</span> telemetry.span(<span class="st">"session.compaction"</span>, **{<span class="st">"compaction.event_count"</span>: len(events)}) <span class="kw">as</span> cs:
+    summary = ...                                   <span class="cm"># existing summarization; its LLM call nests via litellm</span>
+    cs.set_attribute(<span class="st">"compaction.summary_bytes"</span>, len(summary))</code></pre>
+  </div>
+
+
+  <!-- ===================== PHASE 5 ===================== -->
+  <h2><span class="pnum">Phase 5</span> &mdash; Config, docs &amp; verification</h2>
+
+  <div class="phase">
+    <h3><span class="snum">5.1</span> Environment variables</h3>
+    <p class="file">Document in <code>.env.example</code> and <code>README.md</code></p>
+    <table>
+      <thead><tr><th>Var</th><th>Purpose</th><th>Default</th></tr></thead>
+      <tbody>
+        <tr><td><code>LOGFIRE_TOKEN</code></td><td>Enables Logfire UI export; absent &rArr; full no-op</td><td>unset</td></tr>
+        <tr><td><code>AGENT_ENV</code></td><td><code>environment</code> tag (dev/staging/prod)</td><td><code>dev</code></td></tr>
+        <tr><td><code>OTEL_SERVICE_NAME</code></td><td>service name</td><td><code>ai-agent</code></td></tr>
+        <tr><td><code>AGENT_VERSION</code></td><td>service version tag</td><td>pyproject version</td></tr>
+        <tr><td><code>TRACE_CAPTURE_CONTENT</code></td><td><code>1</code> &rArr; full prompts/args/results</td><td>unset (summaries)</td></tr>
+        <tr><td><code>TRACE_CONSOLE</code></td><td><code>0</code> &rArr; disable console spans (UI only)</td><td>enabled</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="phase">
+    <h3><span class="snum">5.2</span> Verification (end-to-end)</h3>
+    <ol>
+      <li><strong>No-op safety:</strong> with <code>LOGFIRE_TOKEN</code> unset, run
+        <code>uv run python testing_files/run_all.py</code> &mdash; all phase tests pass unchanged.</li>
+      <li><strong>Console traces:</strong> with a token, <code>uv run python main.py</code>, type a prompt,
+        confirm <code>agent.request &rarr; agent.turn &rarr; litellm &lt;model&gt; &rarr; agent.tool {name}</code>.</li>
+      <li><strong>UI traces:</strong> run a deep-research prompt; confirm <code>capability.pipeline</code>
+        with nested <code>capability.phase plan/gen/eval</code>, <code>agent.subagent</code> per role, and a
+        concurrent <code>capability.delegate</code> fan-out of N worker spans; tokens/cost on litellm spans.</li>
+      <li><strong>Metrics:</strong> force a tool error + a subagent timeout; confirm <code>tool.errors</code>
+        and <code>subagent.failures</code> counters in the metrics view.</li>
+      <li><strong>Scrubbing &amp; gating:</strong> default run shows <code>*_preview</code>/<code>*_bytes</code>
+        and no secrets; <code>TRACE_CAPTURE_CONTENT=1</code> shows full payloads (still scrubbed).</li>
+      <li><strong>FastAPI:</strong> <code>curl</code> the <code>/webhook</code> route; confirm the HTTP span
+        parents an <code>agent.request</code> subtree.</li>
+    </ol>
+  </div>
+
+
+  <h2>Files to create / modify <span class="meta">(by phase)</span></h2>
+  <table>
+    <thead><tr><th>Phase</th><th>File</th><th>Change</th></tr></thead>
+    <tbody>
+      <tr><td>0.1</td><td><code>pyproject.toml</code></td><td>add <code>logfire[fastapi]&gt;=3</code></td></tr>
+      <tr><td>0.2</td><td><code>tool_base.py</code></td><td><code>telemetry_attributes()</code> on <code>RunBudget</code> &amp; <code>AgentContext</code></td></tr>
+      <tr><td>0.2</td><td><code>capabilities/shared/config.py</code></td><td><code>telemetry_attributes()</code> on <code>CapabilityConfig</code></td></tr>
+      <tr><td>0.3</td><td><code>telemetry.py</code> <em>(new)</em></td><td>config, <code>span</code>, <code>_NullSpan</code>, <code>payload</code>, metric recorders, <code>instrument_fastapi</code></td></tr>
+      <tr><td>1.1&ndash;1.3</td><td><code>main.py</code></td><td><code>configure_telemetry()</code> first; <code>instrument_fastapi(app)</code>; use <code>run_to_completion</code></td></tr>
+      <tr><td>2.1&ndash;2.3</td><td><code>agent.py</code></td><td><code>configure_telemetry()</code> in entry; <code>run_to_completion</code> helper; <code>agent.turn</code> + <code>agent.tool</code> spans</td></tr>
+      <tr><td>2.1</td><td><code>telegram_server.py</code></td><td>use <code>run_to_completion</code> in webhook</td></tr>
+      <tr><td>3.1&ndash;3.4</td><td><code>capabilities/shared/engine.py</code></td><td><code>capability.pipeline</code> + <code>capability.phase</code> spans</td></tr>
+      <tr><td>3.3&ndash;3.4</td><td><code>subagent_tools.py</code></td><td><code>agent.subagent</code> + <code>capability.delegate</code> spans</td></tr>
+      <tr><td>4.1</td><td><code>session.py</code></td><td><code>session.compaction</code> span</td></tr>
+      <tr><td>5.1</td><td><code>.env.example</code> / <code>README.md</code></td><td>document env vars</td></tr>
+    </tbody>
+  </table>
+
+  <hr>
+  <p class="meta">Plan generated in plan mode &mdash; awaiting your review. Reply with changes or approval and I'll implement, phase by phase.</p>
+
+</div>
+</body>
+</html>
