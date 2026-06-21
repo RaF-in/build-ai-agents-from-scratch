@@ -178,54 +178,67 @@ class AgentRuntime:
         Pass user_text on first call. Pass None when looping after tool calls.
         Returns True if tools were called (keep looping), False when done.
         """
-        if user_text is not None:
-            self._sys_prompt = sys_prompt
-            self._idle_continuations = 0  # fresh user turn — reset the idle gate
-            self._last_tool_sig = None    # and the repeated-call detector (7.2)
-            self._repeat_count = 0
-            self._force_summary = False
-            await self.session_manager.add_message(
-                SessionEvent(role="user", parts=[TextPart(text=user_text)])
+        # Phase 2.2: one span per turn (one LLM round-trip + any tool dispatch).
+        # Carries the run context's telemetry attributes (the single source of
+        # truth) plus the model. No-op when telemetry is disabled.
+        turn_attrs = {"agent.model": self.model_name}
+        turn_attrs.update(self.context.telemetry_attributes())
+        with telemetry.span("agent.turn", **turn_attrs) as turn:
+            if user_text is not None:
+                self._sys_prompt = sys_prompt
+                self._idle_continuations = 0  # fresh user turn — reset the idle gate
+                self._last_tool_sig = None    # and the repeated-call detector (7.2)
+                self._repeat_count = 0
+                self._force_summary = False
+                await self.session_manager.add_message(
+                    SessionEvent(role="user", parts=[TextPart(text=user_text)])
+                )
+
+            conversation = await self.session_manager.load_messages()
+            if self._sys_prompt:
+                # Phase 0.7: the policy may wrap/extend the base prompt. DefaultPolicy
+                # returns it unchanged, so the main agent's prompt is identical.
+                sys_text = self._policy().system_prompt(self._sys_prompt)
+                conversation = [SessionEvent(
+                    role="system",
+                    parts=[TextPart(text=sys_text)],
+                )] + conversation
+
+            last_user_idx = -1
+            for idx in range(len(conversation) - 1, -1, -1):
+                event = conversation[idx]
+                if isinstance(event, SessionEvent) and event.role == "user":
+                    last_user_idx = idx
+                    break
+            events_since_user = (
+                len(conversation) if last_user_idx < 0
+                else len(conversation) - last_user_idx - 1
             )
+            has_tool_budget = events_since_user < self.max_tool_calls_per_turn
 
-        conversation = await self.session_manager.load_messages()
-        if self._sys_prompt:
-            # Phase 0.7: the policy may wrap/extend the base prompt. DefaultPolicy
-            # returns it unchanged, so the main agent's prompt is identical.
-            sys_text = self._policy().system_prompt(self._sys_prompt)
-            conversation = [SessionEvent(
-                role="system",
-                parts=[TextPart(text=sys_text)],
-            )] + conversation
+            messages = SessionManager.events_to_litellm_messages(conversation)
+            # Phase 7.2: a forced summary turn (repeat limit hit) suppresses tools exactly
+            # like the per-turn budget brake, so the model must answer in prose and the
+            # loop terminates. _force_summary is one-shot.
+            force_summary = self._force_summary
+            self._force_summary = False
+            if force_summary:
+                messages.append({"role": "user", "content": REPEATED_TOOL_CALL_GUARDRAIL})
+            elif not has_tool_budget:
+                messages.append({"role": "user", "content": TOOL_CALL_GUARDRAIL_INSTRUCTION})
 
-        last_user_idx = -1
-        for idx in range(len(conversation) - 1, -1, -1):
-            event = conversation[idx]
-            if isinstance(event, SessionEvent) and event.role == "user":
-                last_user_idx = idx
-                break
-        events_since_user = (
-            len(conversation) if last_user_idx < 0
-            else len(conversation) - last_user_idx - 1
-        )
-        has_tool_budget = events_since_user < self.max_tool_calls_per_turn
+            tools = self.get_tools() if (has_tool_budget and not force_summary) else None
+            response = await acompletion(model=self.model_name, messages=messages, tools=tools)
+            msg = response.choices[0].message
+            tool_calls = msg.tool_calls
+            # Token metric from the usage litellm already returned (Phase 2.2 / point 4:
+            # no re-instrumented HTTP call). litellm's callback owns the LLM span itself.
+            telemetry.record_tokens(getattr(response, "usage", None))
+            turn.set_attribute("agent.turn.tool_calls", len(tool_calls or []))
 
-        messages = SessionManager.events_to_litellm_messages(conversation)
-        # Phase 7.2: a forced summary turn (repeat limit hit) suppresses tools exactly
-        # like the per-turn budget brake, so the model must answer in prose and the
-        # loop terminates. _force_summary is one-shot.
-        force_summary = self._force_summary
-        self._force_summary = False
-        if force_summary:
-            messages.append({"role": "user", "content": REPEATED_TOOL_CALL_GUARDRAIL})
-        elif not has_tool_budget:
-            messages.append({"role": "user", "content": TOOL_CALL_GUARDRAIL_INSTRUCTION})
+            return await self._run_turn_body(msg, tool_calls)
 
-        tools = self.get_tools() if (has_tool_budget and not force_summary) else None
-        response = await acompletion(model=self.model_name, messages=messages, tools=tools)
-        msg = response.choices[0].message
-        tool_calls = msg.tool_calls
-
+    async def _run_turn_body(self, msg, tool_calls) -> bool:
         if tool_calls:
             # Phase 7.2: detect the model repeating the EXACT same call(s). On the Nth
             # consecutive identical turn, drop this turn (don't add or execute it) and
@@ -292,33 +305,53 @@ class AgentRuntime:
 
     async def run_tool(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
         self.reload_runtime()
-        # Phase 0.6: enforce the total run budget BEFORE dispatch. The budget is shared
-        # across the whole run (generator + workers); when exhausted we return a clean
-        # error so the run wraps up with partial results instead of crashing. None on
-        # the main agent => no total cap => behavior unchanged.
-        budget = self.context.run_budget
-        if budget is not None:
-            if budget.exhausted():
+        # Phase 2.3: one span per tool dispatch. Args captured as a summary by
+        # default (full payload only under TRACE_CAPTURE_CONTENT=1). The span sets
+        # tool.status on every exit path and feeds the tool.errors metric on genuine
+        # failures. No-op when telemetry is disabled.
+        tool_attrs = {"tool.name": tool_name, "agent.depth": self.context.depth}
+        tool_attrs.update(telemetry.payload("tool.args", args))
+        with telemetry.span(f"agent.tool {tool_name}", **tool_attrs) as tool_span:
+            # Phase 0.6: enforce the total run budget BEFORE dispatch. The budget is shared
+            # across the whole run (generator + workers); when exhausted we return a clean
+            # error so the run wraps up with partial results instead of crashing. None on
+            # the main agent => no total cap => behavior unchanged.
+            budget = self.context.run_budget
+            if budget is not None:
+                if budget.exhausted():
+                    # A planned graceful stop, not a tool failure — record status only.
+                    tool_span.set_attribute("tool.status", "budget_exhausted")
+                    return ToolResult(name=tool_name, error=True, result={
+                        "error": (
+                            "Run budget exhausted (tool-call or wall-clock limit reached). "
+                            "Stop calling tools and summarise the partial results so far."
+                        )
+                    })
+                budget.calls += 1
+            tool_cls = self.tools.get(tool_name)
+            if not tool_cls:
+                tool_span.set_attribute("tool.status", "not_found")
+                telemetry.record_tool_error(tool_name)
                 return ToolResult(name=tool_name, error=True, result={
-                    "error": (
-                        "Run budget exhausted (tool-call or wall-clock limit reached). "
-                        "Stop calling tools and summarise the partial results so far."
-                    )
+                    "error": f"Tool {tool_name} is not available"
                 })
-            budget.calls += 1
-        tool_cls = self.tools.get(tool_name)
-        if not tool_cls:
-            return ToolResult(name=tool_name, error=True, result={
-                "error": f"Tool {tool_name} is not available"
-            })
-        try:
-            tool_obj = tool_cls.model_validate(args)
-            tool_result: ToolResult = await tool_obj.execute(self.context)
-            return tool_result
-        except Exception as e:
-            return ToolResult(name=tool_name, error=True, result={
-                "error": f"Error while running tool {tool_name}"
-            })
+            try:
+                tool_obj = tool_cls.model_validate(args)
+                tool_result: ToolResult = await tool_obj.execute(self.context)
+                tool_span.set_attribute("tool.status", "error" if tool_result.error else "ok")
+                tool_span.set_attributes(telemetry.payload("tool.result", tool_result.result))
+                if tool_result.error:
+                    telemetry.record_tool_error(tool_name)
+                return tool_result
+            except Exception as e:
+                # Recoverable status case (point 6): the kernel deliberately turns a
+                # tool crash into an error ToolResult so the agent can react, rather
+                # than letting it abort the run. Mark the span and count it.
+                tool_span.set_attribute("tool.status", "exception")
+                telemetry.record_tool_error(tool_name)
+                return ToolResult(name=tool_name, error=True, result={
+                    "error": f"Error while running tool {tool_name}"
+                })
 async def print_llm_response(*, message: dict[str, Any], context: AgentContext):
     if message.content:
         print(f"[green]Assistant: {message.content}[/green]")
@@ -342,6 +375,24 @@ async def render_history_event(*, event: StoredEvent) -> None:
         error = "error" in part.data.response
         status = "[green]✓[/green]" if not error else "[red]✗[/red]"
         print(f"{status} [bold]{call_name}[/bold] {call_args}")
+
+async def run_to_completion(runtime, user_text, sys_prompt, *, channel) -> bool:
+    """Phase 2.1: drive one user request to completion inside an ``agent.request``
+    span — the run plus its tool-call follow-up loop. This is the single entry
+    point shared by the CLI, the Telegram webhook, and the cron dispatcher
+    (replacing three duplicated run/while-has_more loops), so every channel gets a
+    consistent top-level trace. The span carries the channel, model, and the run
+    context's telemetry attributes (the one source of truth). No-op when telemetry
+    is disabled. Returns the final ``has_more`` (always False on normal exit).
+    """
+    req_attrs = {"channel": channel, "agent.model": runtime.model_name}
+    req_attrs.update(runtime.context.telemetry_attributes())
+    with telemetry.span("agent.request", **req_attrs):
+        has_more = await runtime.run(user_text=user_text, sys_prompt=sys_prompt)
+        while has_more:
+            has_more = await runtime.run(user_text=None, sys_prompt=None)
+        return has_more
+
 
 def _create_cli_runtime(cron_service=None):
     context = AgentContext(cron_service=cron_service)
@@ -382,9 +433,7 @@ async def _cli_loop(runtime):
 
         # Normal LLM flow
         sys_prompt = prepare_system_message(MemoryManager(), skill_manager.format_for_prompt())
-        has_more = await runtime.run(user_text=user_text, sys_prompt=sys_prompt)
-        while has_more:
-            has_more = await runtime.run(user_text=None, sys_prompt=None)
+        await run_to_completion(runtime, user_text, sys_prompt, channel="cli")
 
 async def start_cli(cron_service):
     global cli_runtime

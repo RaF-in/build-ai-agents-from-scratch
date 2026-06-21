@@ -21,6 +21,7 @@ from rich import print
 
 from tool_base import AgentContext, RunBudget
 from subagent_tools import run_subagent
+import telemetry
 from .config import CapabilityConfig, RoleConfig
 from .todo import TodoList
 from .artifacts import (
@@ -204,15 +205,28 @@ async def run_pipeline(
     context.run_budget = RunBudget()
     context.run_semaphore = asyncio.Semaphore(config.breadth)
     started_at = time.time()
-    try:
-        for phase in descriptor:
-            if context.run_budget.exhausted():
-                break   # graceful: stop here and synthesize from what exists
-            await PHASE_RUNNERS[phase](brief, config, context)
-        return read_final_artifact(context.workspace_dir)
-    finally:
-        _log_run(brief, config, context, descriptor, started_at)   # 7.4 observability
-        schedule_workspace_cleanup(context.workspace_dir)           # 7.5 TTL sweep
+    # Phase 3.1: one span for the whole capability run, stamped with the config's
+    # telemetry attributes (the source of truth). Each phase nests under it (3.2),
+    # and the role/worker subagent spans nest under those. No-op when disabled.
+    with telemetry.span(
+        f"capability.pipeline {config.name}", **config.telemetry_attributes()
+    ) as pipe:
+        try:
+            for phase in descriptor:
+                if context.run_budget.exhausted():
+                    break   # graceful: stop here and synthesize from what exists
+                # Phase 3.2: one span per descriptor phase (plan / gen / eval).
+                with telemetry.span(f"capability.phase {phase}"):
+                    await PHASE_RUNNERS[phase](brief, config, context)
+            final = read_final_artifact(context.workspace_dir)
+            # Final budget state + outcome on the pipeline span. context attrs include
+            # the budget (calls / elapsed / exhausted) now that the run is done.
+            pipe.set_attributes(context.telemetry_attributes())
+            pipe.set_attribute("capability.produced_report", bool(final.strip()))
+            return final
+        finally:
+            _log_run(brief, config, context, descriptor, started_at)   # 7.4 observability
+            schedule_workspace_cleanup(context.workspace_dir)           # 7.5 TTL sweep
 
 
 def _log_run(brief, config, context, descriptor, started_at) -> None:

@@ -34,9 +34,10 @@ async def process_cron_messages(cron_service):
             else:
                 continue
 
-            has_more = await runtime.run(user_text=msg["text"], sys_prompt=sys_prompt)
-            while has_more:
-                has_more = await runtime.run(user_text=None, sys_prompt=None)
+            # Phase 2.1: one agent.request span per cron-delivered message.
+            await agent.run_to_completion(
+                runtime, msg["text"], sys_prompt, channel=f"cron:{channel}"
+            )
 
         except Exception as e:
             print(f"[Cron Error] {e}")

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 
 from tool_base import AgentContext, AgentTool, ToolResult
+import telemetry
 from subagent import (
     subagent_registry,
     SUBAGENT_TIMEOUT_SECONDS, SUBAGENT_MODEL, child_system_prompt,
@@ -76,78 +77,96 @@ async def run_subagent(
       * ``todo_list`` — a fresh TodoList for the child (the generator plans into
         it; its completion gate reads it). None leaves the inherited value.
     """
-    # --- Constraint 1: depth budget (structural; this is the safety net) ---
-    # child_tools() already withholds the spawn tool past the budget, so normally
-    # we never reach here too deep. Guard anyway against a misconfigured runtime.
-    if context.depth + 1 > context.max_depth:
-        return ToolResult(name=result_name, error=True, result={
-            "error": (
-                f"Cannot spawn: depth budget reached "
-                f"(depth={context.depth}, max_depth={context.max_depth}). "
-                "Do the work yourself."
-            )
-        })
-
-    # --- Constraint 2: concurrency tracking (cap optional per Phase 0.4) ---
-    if use_global_cap:
-        run = subagent_registry.try_acquire(task)
-        if run is None:
+    # Phase 3.3: one span per spawned child (role or worker). Carries the spawn
+    # name, the spawner's depth, and a summary of the task. subagent.status /
+    # subagent.attempts are set on every exit path; non-completed outcomes feed the
+    # subagent.failures metric. No-op when telemetry is disabled.
+    sa_attrs = {"subagent.name": result_name, "agent.depth": context.depth}
+    sa_attrs.update(telemetry.payload("subagent.task", task))
+    with telemetry.span(f"agent.subagent {result_name}", **sa_attrs) as sa:
+        # --- Constraint 1: depth budget (structural; this is the safety net) ---
+        # child_tools() already withholds the spawn tool past the budget, so normally
+        # we never reach here too deep. Guard anyway against a misconfigured runtime.
+        if context.depth + 1 > context.max_depth:
+            sa.set_attribute("subagent.status", "rejected_depth")
+            telemetry.record_subagent_failure(result_name, "rejected_depth")
             return ToolResult(name=result_name, error=True, result={
                 "error": (
-                    f"Cannot spawn: {subagent_registry.max_concurrent} subagents "
-                    "already running. Wait for one to finish or do the work yourself."
+                    f"Cannot spawn: depth budget reached "
+                    f"(depth={context.depth}, max_depth={context.max_depth}). "
+                    "Do the work yourself."
                 )
             })
-    else:
-        # Run-scoped spawn: concurrency is bounded by the per-run semaphore
-        # (acquired by the caller / delegate tool), not the global cap.
-        run = subagent_registry.register(task)
 
-    last_error = ""
-    try:
-        for attempt in range(1, MAX_RETRIES + 2):  # 1..(1 + MAX_RETRIES)
-            run.attempts = attempt
-            try:
-                # --- Constraint 3: per-spawn timeout via wait_for cancellation ---
-                result_text = await asyncio.wait_for(
-                    _run_child(
-                        task=task,
-                        context=context,
-                        tools_override=tools_override,
-                        sys_prompt=sys_prompt,
-                        model_name=model_name,
-                        max_tool_calls_per_turn=max_tool_calls_per_turn,
-                        policy=policy,
-                        todo_list=todo_list,
-                    ),
-                    timeout=timeout_s,
-                )
-                subagent_registry.complete(run, status="completed", result=result_text)
-                return ToolResult(name=result_name, result={"content": result_text})
+        # --- Constraint 2: concurrency tracking (cap optional per Phase 0.4) ---
+        if use_global_cap:
+            run = subagent_registry.try_acquire(task)
+            if run is None:
+                sa.set_attribute("subagent.status", "rejected_concurrency")
+                telemetry.record_subagent_failure(result_name, "rejected_concurrency")
+                return ToolResult(name=result_name, error=True, result={
+                    "error": (
+                        f"Cannot spawn: {subagent_registry.max_concurrent} subagents "
+                        "already running. Wait for one to finish or do the work yourself."
+                    )
+                })
+        else:
+            # Run-scoped spawn: concurrency is bounded by the per-run semaphore
+            # (acquired by the caller / delegate tool), not the global cap.
+            run = subagent_registry.register(task)
 
-            except asyncio.TimeoutError:
-                last_error = f"timed out after {timeout_s}s"
-                if not RETRY_ON_TIMEOUT:
-                    break  # fail fast — don't freeze the parent for minutes
-            except Exception as e:
-                # Errors come back as content, never a crash (parent decides next step).
-                last_error = str(e)
+        last_error = ""
+        try:
+            for attempt in range(1, MAX_RETRIES + 2):  # 1..(1 + MAX_RETRIES)
+                run.attempts = attempt
+                try:
+                    # --- Constraint 3: per-spawn timeout via wait_for cancellation ---
+                    result_text = await asyncio.wait_for(
+                        _run_child(
+                            task=task,
+                            context=context,
+                            tools_override=tools_override,
+                            sys_prompt=sys_prompt,
+                            model_name=model_name,
+                            max_tool_calls_per_turn=max_tool_calls_per_turn,
+                            policy=policy,
+                            todo_list=todo_list,
+                        ),
+                        timeout=timeout_s,
+                    )
+                    subagent_registry.complete(run, status="completed", result=result_text)
+                    sa.set_attribute("subagent.status", "completed")
+                    sa.set_attribute("subagent.attempts", run.attempts)
+                    return ToolResult(name=result_name, result={"content": result_text})
 
-            # Exhausted attempts? stop. Otherwise back off and retry a fresh child.
-            if attempt >= MAX_RETRIES + 1:
-                break
-            await asyncio.sleep(RETRY_BASE_DELAY * (2 ** (attempt - 1)))
+                except asyncio.TimeoutError:
+                    last_error = f"timed out after {timeout_s}s"
+                    if not RETRY_ON_TIMEOUT:
+                        break  # fail fast — don't freeze the parent for minutes
+                except Exception as e:
+                    # Errors come back as content, never a crash (parent decides next step).
+                    last_error = str(e)
 
-        status = "expired" if "timed out" in last_error else "failed"
-        subagent_registry.complete(run, status=status, result=last_error)
-        return ToolResult(name=result_name, error=True, result={
-            "error": f"Subagent {status} after {run.attempts} attempt(s): {last_error}"
-        })
+                # Exhausted attempts? stop. Otherwise back off and retry a fresh child.
+                if attempt >= MAX_RETRIES + 1:
+                    break
+                await asyncio.sleep(RETRY_BASE_DELAY * (2 ** (attempt - 1)))
 
-    except BaseException:
-        # Cancellation / unexpected: never leak the concurrency slot.
-        subagent_registry.complete(run, status="failed", result="cancelled")
-        raise
+            status = "expired" if "timed out" in last_error else "failed"
+            subagent_registry.complete(run, status=status, result=last_error)
+            sa.set_attribute("subagent.status", status)
+            sa.set_attribute("subagent.attempts", run.attempts)
+            telemetry.record_subagent_failure(result_name, status)
+            return ToolResult(name=result_name, error=True, result={
+                "error": f"Subagent {status} after {run.attempts} attempt(s): {last_error}"
+            })
+
+        except BaseException:
+            # Cancellation / unexpected: never leak the concurrency slot.
+            subagent_registry.complete(run, status="failed", result="cancelled")
+            sa.set_attribute("subagent.status", "cancelled")
+            telemetry.record_subagent_failure(result_name, "cancelled")
+            raise
 
 
 async def _run_child(
@@ -263,8 +282,16 @@ async def delegate_to_workers(
             # Isolate: one worker's failure must not sink the rest of the batch.
             return {task_key: task, "ok": False, "summary": None, "error": str(exc)}
 
-    # gather preserves order; each `one` already returns a result (never raises).
-    return await asyncio.gather(*[one(t) for t in tasks])
+    # Phase 3.4: one span over the whole fan-out. Each worker's agent.subagent span
+    # nests under it (the gather runs inside this span, so the OTel context carries
+    # into every task). No-op when telemetry is disabled.
+    with telemetry.span("capability.delegate", **{"delegate.task_count": len(tasks)}) as dspan:
+        # gather preserves order; each `one` already returns a result (never raises).
+        results = await asyncio.gather(*[one(t) for t in tasks])
+        ok = sum(1 for r in results if r.get("ok"))
+        dspan.set_attribute("delegate.ok_count", ok)
+        dspan.set_attribute("delegate.failed_count", len(results) - ok)
+        return results
 
 
 class SpawnSubagentTool(AgentTool):

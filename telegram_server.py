@@ -2,7 +2,10 @@ from pydantic import BaseModel
 from typing import Any, Optional
 from pathlib import Path
 from tool_base import AgentContext, ToolResult
-from agent import AgentRuntime, render_history_event, print_llm_response, print_tool_result
+from agent import (
+    AgentRuntime, render_history_event, print_llm_response, print_tool_result,
+    run_to_completion,
+)
 from session import SessionManager
 import os
 import asyncio
@@ -91,10 +94,9 @@ async def webhook(update: TelegramUpdate):
     # A /skill: invocation expands into a full LLM turn.
     user_text = result[1] if isinstance(result, tuple) else text
 
-    # Normal LLM flow
-    has_more = await runtime.run(user_text=user_text, sys_prompt=sys_prompt)
-    while has_more:
-        has_more = await runtime.run(user_text=None, sys_prompt=None)
+    # Normal LLM flow (Phase 2.1: wrapped in an agent.request span; nests under the
+    # FastAPI HTTP span from instrument_fastapi).
+    await run_to_completion(runtime, user_text, sys_prompt, channel="telegram")
     return {"ok": True}
 
 if __name__ == "__main__":
