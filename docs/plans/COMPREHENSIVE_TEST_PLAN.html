@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comprehensive Test Plan — Build Your Own AI Agent</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --panel2: #1d2130; --border: #2a2f40;
+    --text: #d7dbe6; --muted: #8a91a6; --accent: #7c9cff; --accent2: #58d6a8;
+    --warn: #ffb454; --err: #ff6b6b; --code-bg: #11141d; --phase: #b292ff;
+    --cli: #7c9cff; --tg: #58d6a8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 30px; line-height: 1.25; margin: 0 0 8px; letter-spacing: -.02em; }
+  h2 { font-size: 22px; margin: 52px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--border); letter-spacing: -.01em; scroll-margin-top: 20px; }
+  h2 .pnum { color: var(--phase); }
+  h3 { font-size: 16.5px; margin: 26px 0 10px; color: var(--accent); }
+  h3 .snum { color: var(--muted); font-weight: 600; }
+  p { margin: 12px 0; }
+  .sub { color: var(--muted); margin-top: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 5px;
+    padding: 1px 6px; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    font-size: 13.5px; color: #e6e9f2;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; overflow-x: auto; font-size: 12.8px; line-height: 1.55;
+    font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; color: #cdd3e2;
+  }
+  pre code { background: none; border: none; padding: 0; font-size: inherit; }
+  .cm { color: #6f7891; }
+  .kw { color: #c891ff; }
+  .st { color: #9ae6b4; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; margin: 18px 0; }
+  .callout { background: var(--panel2); border-left: 3px solid var(--accent); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .callout.good { border-left-color: var(--accent2); }
+  .callout.warn { border-left-color: var(--warn); }
+  .callout.err  { border-left-color: var(--err); }
+  .tag { display: inline-block; font-size: 12px; padding: 2px 9px; border-radius: 20px; background: var(--panel2); border: 1px solid var(--border); color: var(--muted); margin-right: 6px; }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+  tr:last-child td { border-bottom: none; }
+  td code { font-size: 12.5px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* ---- test-case specific ---- */
+  .sectionhead { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--phase); border-radius: 12px; padding: 4px 22px 14px; margin: 22px 0; }
+  .tc { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px 16px; margin: 16px 0; }
+  .tc-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+  .tc-id { font-family: "JetBrains Mono", monospace; font-size: 13px; color: var(--phase); font-weight: 700; }
+  .tc-title { font-size: 15px; font-weight: 600; }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 20px; border: 1px solid var(--border); }
+  .badge.cli { color: var(--cli); border-color: #34406b; background: #161b2c; }
+  .badge.tg  { color: var(--tg);  border-color: #245742; background: #14241d; }
+  .badge.both{ color: #d7dbe6; border-color: var(--border); background: var(--panel2); }
+  .badge.p0 { color: var(--err);  border-color: #5a2b2b; background: #241616; }
+  .badge.p1 { color: var(--warn); border-color: #5a472b; background: #241f16; }
+  .badge.p2 { color: var(--muted); }
+  .badge.fail { color: var(--warn); border-color: #5a472b; background: #241f16; }
+  .badge.obs { color: var(--phase); border-color: #4a3a6b; background: #1d1730; }
+  .tc.obs { border-left: 4px solid var(--phase); }
+  .lbl { font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; margin: 10px 0 3px; }
+  .action { font-size: 14px; }
+  .action .q { color: #e6e9f2; }
+  .expect ul { margin: 4px 0; }
+  .cov { font-size: 12.5px; color: var(--muted); margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+  .cov.gap { color: var(--warn); }
+  .cov .k { color: var(--text); font-weight: 600; }
+  .chk { float: right; font-size: 12px; color: var(--muted); }
+  .toc { columns: 2; column-gap: 32px; }
+  .toc a { display: block; padding: 3px 0; font-size: 14px; }
+  @media (max-width: 720px) { .toc { columns: 1; } }
+  .legend td:first-child { white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Comprehensive Test Plan — <em>Build Your Own AI Agent</em></h1>
+  <p class="sub">Pre&ndash;go-live functional verification of every shipped capability, run on both the CLI and the Telegram surface, with behavioral pass/fail criteria and a map to the existing automated suite.</p>
+  <div>
+    <span class="tag">Hybrid: manual E2E + automated coverage map</span>
+    <span class="tag">CLI &amp; Telegram</span>
+    <span class="tag">Happy path + key failures</span>
+    <span class="tag">Behavioral assertions</span>
+    <span class="tag">Dogfooding: code work + deep research</span>
+  </div>
+
+  <h2 id="how">How to use this plan</h2>
+  <p>
+    Each functionality has its own section. Every test case states an <span class="lbl" style="display:inline">Action</span>
+    (the exact prompt to type or command to run) followed by the <span class="lbl" style="display:inline">Expected (behavioral)</span>
+    result. Because the agent is LLM-driven and non-deterministic, <strong>expected output is phrased as observable behavior</strong> &mdash;
+    which tool is called, whether the <code>error</code> flag is set, whether a file/artifact/DB-row/trace-span is produced &mdash;
+    never exact wording. A test passes if the behavior holds, regardless of phrasing.
+  </p>
+  <p>Each case also carries a coverage line:</p>
+  <ul>
+    <li><span class="cov" style="border:none;padding:0;margin:0"><span class="k">Covered by:</span></span> an existing automated test in <code>testing_files/</code> exercises the same unit &mdash; run it for a fast, repeatable signal.</li>
+    <li><span class="cov gap" style="border:none;padding:0;margin:0"><span class="k">Gap:</span></span> no automated test exists; this is a manual-only check and a candidate to harden into a new <code>test_*.py</code>.</li>
+  </ul>
+
+  <div class="panel">
+    <p style="margin-top:4px"><strong>Badge legend</strong></p>
+    <table class="legend">
+      <tr><td><span class="badge both">CLI+TG</span></td><td>Run the case on both the CLI and Telegram. <span class="badge cli">CLI</span> / <span class="badge tg">TG</span> mean that surface only.</td></tr>
+      <tr><td><span class="badge p0">P0</span></td><td>Go-live blocker — a demo breaks if this fails.</td></tr>
+      <tr><td><span class="badge p1">P1</span></td><td>Important — degraded experience if broken.</td></tr>
+      <tr><td><span class="badge p2">P2</span></td><td>Nice-to-have / edge.</td></tr>
+      <tr><td><span class="badge fail">failure</span></td><td>Deliberately exercises an error path (the &ldquo;key failures&rdquo; bucket).</td></tr>
+      <tr><td><span class="badge obs">OBS</span></td><td>Observability check (Logfire <code>LOGFIRE_TOKEN</code> set). Distributed into the phase that produces it &mdash; run it right after the functional case above it, reusing that case&rsquo;s action.</td></tr>
+    </table>
+    <p class="meta" style="margin-bottom:4px">Mark each card&rsquo;s <span class="chk" style="float:none">☐ pass&nbsp;&nbsp;☐ fail</span> as you go.</p>
+  </div>
+
+  <h2 id="scope">Scope &amp; decisions</h2>
+  <div class="callout good">
+    <strong>Confirmed with you</strong>
+    <ul>
+      <li><strong>Format:</strong> hybrid — manual end-to-end cases + a pointer to the covering <code>testing_files/</code> test + explicit gaps to automate later.</li>
+      <li><strong>Surfaces:</strong> every functionality tested on <strong>CLI and Telegram</strong>; CLI-only where the interface is inherently CLI (e.g. interactive <code>/new</code> confirm).</li>
+      <li><strong>Depth:</strong> happy path + the key failures that would break a live demo, with a <strong>day-to-day dogfooding lens</strong> (real code work + deep research).</li>
+      <li><strong>Expected output:</strong> behavioral assertions only.</li>
+      <li><strong>Deep research:</strong> exercised on <strong>both technical and non-technical</strong> topics.</li>
+      <li><strong>Provider:</strong> mixed per feature (recommended provider noted per section) to control cost on the fan-out-heavy paths.</li>
+    </ul>
+  </div>
+  <div class="callout warn">
+    <strong>Out of scope (your call)</strong>
+    <ul>
+      <li><strong>Bot/abuse security hardening</strong> — the public Telegram bot exposes <code>Bash</code>/<code>Write</code>/<code>Edit</code> with host FS access; you are handling deployment security separately.</li>
+      <li><strong>Go-live / deployment readiness</strong> — hosting, webhook registration, secrets management are owned elsewhere.</li>
+      <li><strong>Article-writer capability</strong> — not fully developed; intentionally untested here.</li>
+    </ul>
+  </div>
+
+  <h2 id="preflight">Pre-flight setup</h2>
+  <p>Run once before the suite. Recommended provider per feature (the &ldquo;mix&rdquo; you chose):</p>
+  <table>
+    <tr><th>Bucket</th><th>Recommended provider</th><th>Why</th></tr>
+    <tr><td>Loop, tools, skills, subagents, cron, storage, compaction, slash</td><td>LM Studio (local)</td><td>Free, no rate limits, infra-level behavior doesn&rsquo;t need a strong model.</td></tr>
+    <tr><td>Deep research, web search (fan-out)</td><td>Groq</td><td>Fast + cheap under parallel worker load.</td></tr>
+    <tr><td>Telegram parity checks</td><td>HuggingFace GLM-5.1</td><td>Matches the live default (<code>telegram_server.py</code>) exactly.</td></tr>
+    <tr><td>Observability</td><td>any (token set)</td><td>Provider-agnostic; the point is the span tree.</td></tr>
+  </table>
+  <pre><code><span class="cm"># 1. Deps + env</span>
+uv sync
+cp .env.example .env            <span class="cm"># fill keys per the table above</span>
+
+<span class="cm"># 2. Fast automated baseline — must be green before manual testing</span>
+uv run python testing_files/run_all.py
+
+<span class="cm"># 3. CLI under test</span>
+uv run python agent.py
+
+<span class="cm"># 4. Full service (Telegram webhook :8000 + cron + CLI) for the TG cases</span>
+uv run python main.py
+<span class="cm"># register webhook once (your tunnel/host URL):</span>
+<span class="cm"># https://api.telegram.org/bot&lt;TOKEN&gt;/setWebhook?url=https://&lt;host&gt;/webhook</span></code></pre>
+  <div class="callout">For Telegram cases, &ldquo;send X&rdquo; means send the message to your bot chat; &ldquo;observe&rdquo; means watch the bot&rsquo;s reply <em>and</em> the server console (tool-execution lines print there).</div>
+
+  <h2 id="toc">Sections</h2>
+  <div class="toc panel">
+    <a href="#s1">1 &nbsp;Agent loop</a>
+    <a href="#s2">2 &nbsp;Tool use (Read / Write / Edit / Bash)</a>
+    <a href="#s3">3 &nbsp;Skills</a>
+    <a href="#s4">4 &nbsp;Subagents</a>
+    <a href="#s5">5 &nbsp;Persistent storage</a>
+    <a href="#s6">6 &nbsp;Session compaction</a>
+    <a href="#s7">7 &nbsp;Cron jobs</a>
+    <a href="#s8">8 &nbsp;Deep research capability</a>
+    <a href="#s9">9 &nbsp;Web search providers</a>
+    <a href="#s10">10 &nbsp;LLM resilience</a>
+    <a href="#s11">11 &nbsp;Slash commands</a>
+    <a href="#s12">12 &nbsp;Dogfooding E2E (code + research)</a>
+  </div>
+  <p class="meta">Observability (Logfire) has no standalone section &mdash; its checks are distributed as <span class="badge obs">OBS</span> cards inside the phases that produce them: <a href="#s1">§1</a> (no-op + span tree + tokens), <a href="#s2">§2</a> (tool.errors + gating), <a href="#s4">§4</a> (subagent.failures), <a href="#s5">§5</a> (webhook parenting), <a href="#s8">§8</a> (pipeline fan-out), <a href="#s9">§9</a> (secret scrubbing).</p>
+
+  <!-- ===================== SECTION 1 ===================== -->
+  <h2 id="s1"><span class="pnum">1.</span> Agent loop</h2>
+  <div class="sectionhead">
+    <p>The turn loop in <code>agent.py</code>: send a message → LLM streams a reply → tool calls are dispatched → results fed back → loop until the model stops calling tools (completion gate). Includes the <strong>tool-call guardrail</strong> (after many tool calls, the agent is told to stop and summarize) and the <strong>idle-loop safety bound</strong>.</p>
+    <p class="meta">Files: <code>agent.py</code> (<code>run_to_completion</code>, completion gate, <code>TOOL_CALL_GUARDRAIL_INSTRUCTION</code>). Provider: LM Studio.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">1.1</span><span class="tc-title">Plain question, no tools</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;In one sentence, what is an async event loop?&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>A single streamed text answer; <strong>no</strong> tool call is made.</li>
+      <li>The turn ends after one completion (loop exits cleanly, prompt returns).</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> no automated E2E for the bare loop; harness is exercised indirectly by <code>test_phase1_engine.py</code>.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">1.2</span><span class="tc-title">Single tool round-trip</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Read the file <code>README.md</code> and tell me the run command.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Exactly one <code>ReadTool</code> call with <code>path=README.md</code>, <code>error=false</code>.</li>
+      <li>The model then produces a final text turn citing <code>uv run python agent.py</code> — i.e. the tool result was fed back into the loop.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> dispatch path manual-only; <code>ReadTool</code> unit behavior is implicitly used across suites but not unit-tested.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">1.3</span><span class="tc-title">Multi-step chained tools in one turn</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Create <code>/tmp/agent_demo.txt</code> with the text <code>hello</code>, then read it back to confirm.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>A <code>WriteTool</code> call followed by a <code>ReadTool</code> call (the loop continued after the first tool result).</li>
+      <li>Final turn confirms the content is <code>hello</code>. File exists on disk.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">1.4</span><span class="tc-title">Tool-call guardrail trips</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Read these 30 files one at a time: <code>file_1.txt</code> … <code>file_30.txt</code> in <code>testing_files/</code> (most don&rsquo;t exist).&rdquo;</span> — drives a long tool-call streak.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>After the threshold, the loop injects <code>TOOL_CALL_GUARDRAIL_INSTRUCTION</code>: the agent stops calling tools, summarizes, and asks for clarification.</li>
+      <li>It does <strong>not</strong> spin indefinitely (idle-loop safety bound holds).</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only; threshold/guardrail constants are in <code>agent.py</code>.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">1.5</span><span class="tc-title">Completion gate keeps looping while work remains</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Covered automatically — run <code>uv run python testing_files/test_phase1_engine.py</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>PlanExecutePolicy</code> completion gate re-loops while todos are open and exits when the model stops (suite prints green).</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>testing_files/test_phase1_engine.py</code> (1.1 PlanExecutePolicy gate).</div>
+  </div>
+
+  <div class="tc obs">
+    <div class="tc-head"><span class="tc-id">1.O1</span><span class="tc-title">No-op safety without a token</span><span class="badge obs">OBS</span><span class="badge cli">CLI</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">With <code>LOGFIRE_TOKEN</code> <strong>unset</strong>: <code>uv run python testing_files/run_all.py</code> and run a normal CLI turn.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Suite passes unchanged; telemetry is a complete no-op — nothing configured/sent/printed. Behavior identical to telemetry-off. <em>(This is the baseline that makes every other OBS card opt-in.)</em></li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> the whole suite runs token-less by default (README runbook step 1).</div>
+  </div>
+
+  <div class="tc obs">
+    <div class="tc-head"><span class="tc-id">1.O2</span><span class="tc-title">Loop span tree + token metric</span><span class="badge obs">OBS</span><span class="badge cli">CLI</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Set <code>LOGFIRE_TOKEN</code>, then re-run case <strong>1.2</strong> (Read a file). Watch console + Logfire UI.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Span tree <code>agent.request → agent.turn → litellm &lt;model&gt; → agent.tool ReadTool</code>, with latency on each span.</li>
+      <li>The litellm span carries tokens/cost; the <code>llm.tokens</code> metric tracks input/output. <em>(README runbook step 2.)</em></li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual visual check.</div>
+  </div>
+
+  <!-- ===================== SECTION 2 ===================== -->
+  <h2 id="s2"><span class="pnum">2.</span> Tool use — Read / Write / Edit / Bash</h2>
+  <div class="sectionhead">
+    <p>The four core file/shell tools in <code>agent_tools.py</code>. Each returns a structured <code>ToolResult</code> with an <code>error</code> flag; tests assert the flag and the on-disk effect, not phrasing.</p>
+    <p class="meta">Files: <code>agent_tools.py</code> (<code>ReadTool</code>, <code>WriteTool</code>, <code>EditTool</code>, <code>BashTool</code>). Provider: LM Studio.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">2.1</span><span class="tc-title">Read — happy + missing path</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Read <code>pyproject.toml</code>.&rdquo;</span> then <span class="q">&ldquo;Read <code>/tmp/does_not_exist_xyz.txt</code>.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>First: <code>error=false</code>, content wrapped in <code>&lt;content&gt;</code>; the model reports real file contents.</li>
+      <li>Second: <code>error=true</code> with a &ldquo;path does not exist&rdquo; message; the agent surfaces the failure gracefully (no crash, no hallucinated contents).</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — candidate for a tiny <code>test_tools.py</code>.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">2.2</span><span class="tc-title">Write — creates parents</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Write <code>/tmp/agent_test/nested/note.md</code> with a short markdown heading.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>error=false</code>; the nested directory is created (<code>os.makedirs</code>) and the file exists with the content.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">2.3</span><span class="tc-title">Edit — single, ambiguous, replaceAll</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Create <code>/tmp/edit_me.txt</code> = <code>foo foo bar</code>. (a) <span class="q">replace <code>bar</code>→<code>baz</code></span>; (b) <span class="q">replace <code>foo</code>→<code>qux</code> (no replaceAll)</span>; (c) <span class="q">replace all <code>foo</code>→<code>qux</code></span>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>(a) <code>error=false</code>, 1 replacement.</li>
+      <li>(b) <code>error=true</code> — multiple occurrences, asks to replaceAll (no write).</li>
+      <li>(c) <code>error=false</code>, both replaced. Editing a missing <code>oldContent</code> → <code>error=true</code>.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — strong candidate to automate (pure, deterministic logic).</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">2.4</span><span class="tc-title">Bash — happy, bad cwd, timeout</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">(a) <span class="q">&ldquo;Run <code>git log --oneline -3</code> in this repo.&rdquo;</span> (b) <span class="q">&ldquo;Run <code>ls</code> in <code>/nope/missing</code>.&rdquo;</span> (c) <span class="q">&ldquo;Run <code>sleep 60</code> with a 2s timeout.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>(a) <code>error=false</code>; real stdout (commit lines) returned.</li>
+      <li>(b) <code>error=true</code> — invalid working directory, before executing.</li>
+      <li>(c) <code>error=true</code> — &ldquo;Time expired&rdquo; (TimeoutExpired caught), agent recovers.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc obs">
+    <div class="tc-head"><span class="tc-id">2.O1</span><span class="tc-title">tool.errors metric + payload gating/preview</span><span class="badge obs">OBS</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Token set. Re-run the <strong>missing-path</strong> Read from 2.1, then the bad-cwd Bash from 2.4. Inspect spans/metrics, then re-run once with <code>TRACE_CAPTURE_CONTENT=1</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>tool.errors</code> counter (by <code>tool</code>) increments once per failed dispatch.</li>
+      <li>Default: <code>agent.tool</code> spans show a byte count + 200-char preview, never the full payload. With <code>=1</code>: the full payload appears. <em>(README runbook steps 4–5, content half.)</em></li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual visual check.</div>
+  </div>
+
+  <!-- ===================== SECTION 3 ===================== -->
+  <h2 id="s3"><span class="pnum">3.</span> Skills</h2>
+  <div class="sectionhead">
+    <p>Filesystem-backed, self-authoring skills (<code>skills.py</code> + <code>skills_tools.py</code>): discovered from <code>*/SKILL.md</code> across user/project/bundled dirs (first-match-wins), surfaced as a small XML catalog, and invokable via <code>/skill:&lt;name&gt;</code>. The agent can create/list/delete skills with its own tools.</p>
+    <p class="meta">Files: <code>skills.py</code>, <code>skills_tools.py</code>, <code>skills/</code> (bundled: <code>create-skill</code>, <code>git-commit</code>, <code>calibrate-evaluator</code>). Provider: LM Studio.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">3.1</span><span class="tc-title">List discovers bundled skills</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;List all available skills.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>SkillListTool</code> runs; output includes <code>create-skill</code>, <code>git-commit</code>, <code>calibrate-evaluator</code> grouped by source.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — discovery logic is deterministic and worth a unit test.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">3.2</span><span class="tc-title">Create → invoke → delete round-trip</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">(a) <span class="q">&ldquo;Create a skill named <code>pirate-reply</code> that rewrites my next message in pirate-speak.&rdquo;</span> (b) send <span class="q"><code>/skill:pirate-reply Refactor this function</code></span> (c) <span class="q">&ldquo;Delete the <code>pirate-reply</code> skill.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>(a) <code>SkillCreateTool</code> writes <code>~/.ai_assistant/skills/pirate-reply/SKILL.md</code> with valid frontmatter; re-discovery picks it up.</li>
+      <li>(b) the slash command expands the skill instructions into a turn; reply follows them.</li>
+      <li>(c) <code>SkillDeleteTool</code> removes the file+dir; a re-list no longer shows it.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — CRUD in <code>SkillManager</code> is pure and highly automatable.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">3.3</span><span class="tc-title">Invalid name &amp; duplicate rejected</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Create a skill named <code>bad name!!</code>&rdquo;</span> then <span class="q">&ldquo;Create a skill named <code>git-commit</code>&rdquo;</span> (already bundled).</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>First → rejected: invalid name, asks for kebab-case (no file written).</li>
+      <li>Second → rejected: already exists, points at the existing path.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">3.4</span><span class="tc-title">Unknown skill invocation</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Send <span class="q"><code>/skill:does-not-exist</code></span>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Error reply &ldquo;Unknown skill&rdquo; listing available names; <strong>no</strong> LLM turn is spent.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only (<code>_expand_skill_command</code>).</div>
+  </div>
+
+  <!-- ===================== SECTION 4 ===================== -->
+  <h2 id="s4"><span class="pnum">4.</span> Subagents</h2>
+  <div class="sectionhead">
+    <p><code>SpawnSubagentTool</code> delegates a scoped task to a child agent (own file/shell tools, depth+1 context). Guardrails: <strong>structural depth budget</strong>, a <strong>concurrency cap</strong> (registry), a <strong>5-min timeout</strong>, and <strong>retry-with-backoff</strong>. Only the child&rsquo;s final summary returns to the parent.</p>
+    <p class="meta">Files: <code>subagent.py</code>, <code>subagent_tools.py</code>. Provider: LM Studio (Groq if you want faster children).</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">4.1</span><span class="tc-title">Spawn a scoped child</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Spawn a subagent to count how many <code>.py</code> files are in this repo and report just the number.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>SpawnSubagentTool</code> runs; child executes its own tool loop; parent receives a concise self-contained summary (the number), not the child&rsquo;s transcript.</li>
+      <li><code>/agents</code> afterward shows the run in history with status <code>completed</code>.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by (structure):</span> <code>test_phase8_reuse.py</code> (entry-tool surfacing); depth/budget asserted across phase suites.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">4.2</span><span class="tc-title">Depth budget is structural</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Run the phase suites that assert a child at <code>max_depth</code> is a leaf (no spawn tool) and over-budget spawns are rejected: <code>uv run python testing_files/run_all.py</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>A spawn beyond <code>max_depth</code> returns <code>rejected_depth</code> rather than recursing; suites green.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> depth-budget assertions in the phase suites (see <code>subagent_tools.py</code> depth guard).</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">4.3</span><span class="tc-title">Concurrency cap holds</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Spawn 5 subagents in parallel, each sleeping ~10s via bash, then summarize.&rdquo;</span> Watch <code>/agents</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>No more than <code>MAX_CONCURRENT_SUBAGENTS</code> (3) appear <em>active</em> at once for globally-capped spawns; the rest queue. All eventually complete or fail cleanly.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — <code>SubagentRegistry.try_acquire</code> cap is unit-testable in isolation.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">4.4</span><span class="tc-title">Child timeout fails fast</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Spawn a subagent that runs <code>sleep 400</code> via bash.&rdquo;</span> (exceeds the 300s child timeout).</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Child is marked <code>expired</code>; the parent&rsquo;s turn is <strong>not</strong> frozen for minutes (<code>RETRY_ON_TIMEOUT=False</code> → fail fast). Parent reports partial result.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only (slow; optional in a routine run).</div>
+  </div>
+
+  <div class="tc obs">
+    <div class="tc-head"><span class="tc-id">4.O1</span><span class="tc-title">subagent.failures metric on a bad spawn</span><span class="badge obs">OBS</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Token set. Re-run case <strong>4.4</strong> (child timeout) — or any over-depth/rejected spawn. Inspect spans/metrics.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>The <code>agent.subagent</code> span records the non-completed <code>subagent.status</code> (e.g. <code>expired</code> / <code>rejected_depth</code>); the <code>subagent.failures</code> counter (by <code>role</code>, <code>status</code>) increments. <em>(README runbook step 4, subagent half.)</em></li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual visual check.</div>
+  </div>
+
+  <!-- ===================== SECTION 5 ===================== -->
+  <h2 id="s5"><span class="pnum">5.</span> Persistent storage</h2>
+  <div class="sectionhead">
+    <p>Per-session SQLite (<code>aiosqlite</code>) history in <code>sessions/</code>: every text/function-call/function-response part is stored and replayed on restart. Also the durable <strong>workspace memory</strong> (<code>~/.ai_assistant/workspace/*.md</code>, seeded from <code>workspace_templates/</code>) and the JSON <strong>cron store</strong>.</p>
+    <p class="meta">Files: <code>session.py</code> (<code>SessionManager</code>), <code>context/memory.py</code>. Provider: LM Studio.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">5.1</span><span class="tc-title">History survives restart</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Tell the agent <span class="q">&ldquo;My favorite number is 4242, remember it.&rdquo;</span> Quit. Relaunch. Ask <span class="q">&ldquo;What&rsquo;s my favorite number?&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>On relaunch the prior turns replay from SQLite (you see the history render); the agent answers <code>4242</code> from context, not a guess.</li>
+      <li>A row count via <code>/model</code> (Messages: N) reflects the stored events.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — round-tripping <code>SessionManager.save_event/load_messages</code> is a strong automation candidate.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">5.2</span><span class="tc-title">Telegram per-chat isolation</span><span class="badge tg">TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">From two different Telegram chats, set different &ldquo;favorite numbers&rdquo;, then ask each to recall.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Each <code>chat_id</code> has its own runtime/session (<code>_runtimes[chat_id]</code>); answers don&rsquo;t bleed across chats.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">5.3</span><span class="tc-title">Workspace memory seeded &amp; read</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Delete <code>~/.ai_assistant/workspace</code>, relaunch, then check the dir; edit <code>USER.md</code> with a fact and ask the agent about it.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>On launch, <code>MemoryManager</code> re-seeds <code>SOUL/USER/MEMORY/AGENTS/BOOTSTRAP.md</code> from templates; the system prompt incorporates the edited fact.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc obs">
+    <div class="tc-head"><span class="tc-id">5.O1</span><span class="tc-title">Webhook HTTP span parents the request tree</span><span class="badge obs">OBS</span><span class="badge tg">TG</span><span class="badge p2">P2</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Token set, <code>main.py</code> running. Send a Telegram message (or <code>curl</code> the <code>/webhook</code> endpoint). Inspect the trace.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>The auto-instrumented FastAPI HTTP span parents an <code>agent.request</code> subtree — end-to-end visibility from inbound webhook through every tool call. <em>(README runbook step 6.)</em></li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual visual check.</div>
+  </div>
+
+  <!-- ===================== SECTION 6 ===================== -->
+  <h2 id="s6"><span class="pnum">6.</span> Session compaction</h2>
+  <div class="sectionhead">
+    <p>When a session grows past the event threshold, older events are summarized into a <code>CompactionEvent</code> so the context window stays bounded while continuity is preserved. Summarization goes through the resilience wrapper.</p>
+    <p class="meta">Files: <code>session.py</code> (<code>CompactionEvent</code>, <code>should_summarize</code>, compaction path). Provider: LM Studio.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">6.1</span><span class="tc-title">Compaction triggers past threshold</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Have a long exchange (drive message count past the summarize threshold — e.g. 40+ events; a quick loop of short Q&amp;A). Watch console/traces.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>A <code>session.compaction</code> step fires; a <code>CompactionEvent</code> summary replaces older raw events in the loaded context.</li>
+      <li>Subsequent turns still recall an <strong>early</strong> fact (continuity preserved through the summary), and <code>/status</code> context % drops after compaction.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — <code>should_summarize</code> boundary + summary insertion are automatable with a fake LLM.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">6.2</span><span class="tc-title">Compaction survives an LLM hiccup</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Force a transient provider error during the summarization call (e.g. point the summarizer at an unreachable model briefly, or rely on the resilience wrapper retry).</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>The wrapper retries; if it ultimately fails, the session continues (no crash) rather than losing the conversation.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by (retry path):</span> <code>test_phase7_resilience.py</code> (429 forwarding / retry).</div>
+  </div>
+
+  <!-- ===================== SECTION 7 ===================== -->
+  <h2 id="s7"><span class="pnum">7.</span> Cron jobs</h2>
+  <div class="sectionhead">
+    <p>The agent schedules future/recurring messages to itself (<code>CronAddTool</code>/<code>List</code>/<code>Remove</code>), persisted to <code>~/.ai_assistant/cron.json</code>. The <code>CronService</code> loop (10s tick) enqueues due jobs; <code>main.py</code> delivers them back through a full <code>agent.request</code> on the right channel. Schedule forms: <code>in:5m</code> (one-shot), <code>interval:3600</code> (recurring secs), or a 5-field cron expression.</p>
+    <p class="meta">Files: <code>cron/cron.py</code>, <code>cron_tools.py</code>, <code>main.py</code> (<code>process_cron_messages</code>). Provider: LM Studio (CLI), GLM-5.1 (TG). <strong>Requires <code>main.py</code> running.</strong></p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">7.1</span><span class="tc-title">One-shot fires &amp; is delivered (TG)</span><span class="badge tg">TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;In 1 minute, message me a one-line motivational quote.&rdquo;</span> (expects schedule <code>in:1m</code>). Wait.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>CronAddTool</code> writes a job with <code>next_run</code> ~60s out; the bot proactively sends the quote unprompted ~1 min later.</li>
+      <li>After firing, the one-shot job is disabled (<code>enabled=false</code>) and does not repeat.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — <code>_calculate_next_run</code> parsing is pure and unit-testable.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">7.2</span><span class="tc-title">Recurring interval repeats</span><span class="badge tg">TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Every 60 seconds, send me the current count, starting now.&rdquo;</span> Observe 2–3 fires, then remove it.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Job persists with an <code>interval:</code>/cron schedule; <code>next_run</code> is recomputed after each fire (it keeps repeating).</li>
+      <li><code>CronRemoveTool</code> (by 8-char id) stops it; <code>CronListTool</code> no longer shows it.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">7.3</span><span class="tc-title">List / remove + persistence across restart</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Add a <code>0 9 * * *</code> daily job, <span class="q">&ldquo;list my cron jobs&rdquo;</span>, restart <code>main.py</code>, list again.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>List shows id/schedule/message/next_run. After restart the job reloads from <code>cron.json</code> and <code>next_run</code> is recalculated (croniter).</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">7.4</span><span class="tc-title">Cron-delivered task uses real tools</span><span class="badge tg">TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;In 1 minute, research the latest on &lt;a topic&gt; and message me 3 bullets.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>The delivered message runs a <strong>full</strong> <code>agent.request</code> (tools available) — not a static echo — and the bot replies with researched bullets. Validates the cron→agent delivery wiring end-to-end.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <!-- ===================== SECTION 8 ===================== -->
+  <h2 id="s8"><span class="pnum">8.</span> Deep research capability</h2>
+  <div class="sectionhead">
+    <p>The flagship pipeline (<code>capabilities/deep_research</code>): a <strong>Planner → Generator → Evaluator</strong> loop on the shared engine, with <strong>parallel web-search worker fan-out</strong>, a calibrated evaluator (verdict store + few-shot examples), and a <strong>citation post-check</strong>. The generator runtime has <strong>no shell tool</strong> (trust boundary) and an <strong>SSRF guard</strong> on fetches. Surfaced to the agent as a single entry tool via the registry.</p>
+    <p class="meta">Files: <code>capabilities/deep_research/*</code>, <code>capabilities/shared/*</code>. Provider: <strong>Groq</strong> (fan-out). Tested on both technical and non-technical topics.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">8.1</span><span class="tc-title">Technical topic — full pipeline</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Deep research: compare async task cancellation in Python&rsquo;s asyncio vs Trio, with trade-offs.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>The deep-research entry tool runs a <code>capability.pipeline</code>: plan → gen → eval phases (visible in traces / run log).</li>
+      <li>Generator fans out concurrent search workers; final report is a <strong>synthesis with inline citations</strong> and a Sources list — not a link dump.</li>
+      <li>Evaluator produces a verdict; a failing first round yields feedback and a refine pass.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>test_phase1</code> (plan→gen), <code>test_phase4</code> (evaluator loop fail→refine→pass), <code>test_phase6</code> (citation post-check), <code>test_phase5</code> (calibration).</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">8.2</span><span class="tc-title">Non-technical topic — full pipeline</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Deep research: what were the main causes of the 2008 financial crisis, for a general audience?&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Same pipeline behavior as 8.1 on a non-technical subject: planned, fanned-out, cited synthesis with a Sources list. Confirms the capability generalizes beyond engineering topics.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> same engine suites as 8.1 (topic-agnostic). End-to-end on a real topic is manual.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">8.3</span><span class="tc-title">Citation post-check rejects uncited claims</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Run <code>uv run python testing_files/test_phase6_synthesis.py</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>CheckCitationsTool</code> flags prose claims with no inline citation, passes a fully cited doc, and dedups the Sources list (suite green).</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>test_phase6_synthesis.py</code>.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">8.4</span><span class="tc-title">Trust boundary — no shell in research runtime</span><span class="badge cli">CLI</span><span class="badge p0">P0</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Run <code>uv run python testing_files/test_phase7_resilience.py</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>No shell tool is reachable anywhere in the research runtime; fetched bytes are wrapped as inert DATA; the repeated-identical-call detector aborts a stuck loop. Suite green.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>test_phase7_resilience.py</code> (7.1, 7.2).</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">8.5</span><span class="tc-title">Evaluator calibration round-trips</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Run <code>uv run python testing_files/test_phase5_calibration.py</code>; optionally drive the <code>calibrate-evaluator</code> skill manually.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>VerdictStore record/recent/label round-trips on a temp DB; few-shot examples are injected into the evaluator prompt (no leftover <code>{{EVAL_EXAMPLES}}</code>).</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>test_phase5_calibration.py</code>.</div>
+  </div>
+
+  <div class="tc obs">
+    <div class="tc-head"><span class="tc-id">8.O1</span><span class="tc-title">Pipeline + concurrent fan-out in the UI</span><span class="badge obs">OBS</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Token set. Re-run case <strong>8.1</strong> (a deep-research query). Open the Logfire UI.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>capability.pipeline</code> with <code>capability.phase</code> plan/gen/eval, per-role <code>agent.subagent</code> spans, and concurrent <code>capability.delegate</code> worker fan-out; tokens/cost on the litellm spans.</li>
+      <li><strong>This is the trace to screenshot for recruiters</strong> — it shows the whole orchestrated system at a glance. <em>(README runbook step 3.)</em></li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual visual check.</div>
+  </div>
+
+  <!-- ===================== SECTION 9 ===================== -->
+  <h2 id="s9"><span class="pnum">9.</span> Web search providers</h2>
+  <div class="sectionhead">
+    <p>Pluggable search backends behind a registry/factory (<code>web/providers.py</code>): <code>tavily</code> (key) or <code>ddgs</code> (keyless), chosen via <code>SEARCH_PROVIDER</code>. Results are normalized to a common <code>SearchResult</code> shape. Fetching is guarded by the SSRF check and HTML→text stripping.</p>
+    <p class="meta">Files: <code>web/providers.py</code>, <code>web/fetch.py</code>, <code>web/tools.py</code>. Provider: any (search is provider-of-LLM-independent).</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">9.1</span><span class="tc-title">Provider selection + normalization</span><span class="badge cli">CLI</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Run <code>uv run python testing_files/test_phase3_reach.py</code>. Then live: set <code>SEARCH_PROVIDER=ddgs</code>, run a deep-research query; repeat with <code>tavily</code> if keyed.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Factory returns the env-selected provider; an unknown provider raises a clear error; results normalize to <code>SearchResult</code>. ddgs works with no key; tavily works with a key.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>test_phase3_reach.py</code> (3.1 providers, registry, normalization, unknown-provider error).</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">9.2</span><span class="tc-title">SSRF guard on fetch</span><span class="badge cli">CLI</span><span class="badge p0">P0</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Run <code>uv run python testing_files/test_phase3_reach.py</code> (3.2 section).</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Non-http schemes, loopback/link-local, and DNS-resolves-to-private are refused; a public IP is allowed; <code>html_to_text</code> strips script/style; fetched content is wrapped untrusted.</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>test_phase3_reach.py</code> (3.2 SSRF guard).</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">9.3</span><span class="tc-title">Keyless fallback when tavily unset</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Unset <code>TAVILY_API_KEY</code>, set <code>SEARCH_PROVIDER=ddgs</code>, run a research query.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Search succeeds via ddgs with no key — the demo works on a fresh clone with zero paid keys.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> live behavior manual; provider unit covered by 9.1.</div>
+  </div>
+
+  <div class="tc obs">
+    <div class="tc-head"><span class="tc-id">9.O1</span><span class="tc-title">Secret scrubbing before sharing a trace</span><span class="badge obs">OBS</span><span class="badge cli">CLI</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Token set, with a real <code>TAVILY_API_KEY</code>/<code>GROQ_API_KEY</code> in env. Run a search-backed query and inspect the spans (including with <code>TRACE_CAPTURE_CONTENT=1</code>).</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>api_key</code> / <code>telegram</code> / <code>tavily</code> / <code>groq</code> patterns are scrubbed from span attributes — <strong>no secret appears even with full payload capture on</strong>. Confirms a trace is safe to screenshot/share publicly. <em>(README runbook step 5, scrubbing half.)</em></li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual visual check.</div>
+  </div>
+
+  <!-- ===================== SECTION 10 ===================== -->
+  <h2 id="s10"><span class="pnum">10.</span> LLM resilience</h2>
+  <div class="sectionhead">
+    <p>Every model call (main agent, subagents, capability roles, compaction) routes through <code>resilient_acompletion</code>: litellm <code>num_retries</code> with backoff on transient errors, plus optional ordered <code>fallbacks</code> across models. Caller-supplied values win; a genuine persistent failure still propagates to the outer subagent retry.</p>
+    <p class="meta">Files: <code>llm_resilience.py</code>. Env: <code>LLM_NUM_RETRIES</code>, <code>LLM_FALLBACKS</code>. Provider: any.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">10.1</span><span class="tc-title">Retry on transient error (429/5xx)</span><span class="badge cli">CLI</span><span class="badge p0">P0</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Run <code>uv run python testing_files/test_phase7_resilience.py</code> (429 forwarding/retry assertions).</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>A transient error is retried per <code>num_retries</code> with backoff; a successful retry yields a normal completion (suite green).</li>
+    </ul></div>
+    <div class="cov"><span class="k">Covered by:</span> <code>test_phase7_resilience.py</code> (7.2 retry / 429).</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">10.2</span><span class="tc-title">Fallback model engages</span><span class="badge cli">CLI</span><span class="badge p1">P1</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Set <code>LLM_FALLBACKS</code> to <code>&lt;reachable-model&gt;</code> and point the primary at a deliberately invalid model id; send any prompt.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>After the primary exhausts retries, litellm tries the fallback and the turn completes via the backup model rather than erroring out.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> fallback wiring is config-only; live engagement is manual.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">10.3</span><span class="tc-title">Persistent failure propagates cleanly</span><span class="badge cli">CLI</span><span class="badge p2">P2</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Point the primary at an invalid model with <strong>no</strong> fallback; send a prompt.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>After retries are exhausted, the error surfaces as a handled message (the loop wraps up with partial results) — the process does not hang or hard-crash.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <!-- ===================== SECTION 11 ===================== -->
+  <h2 id="s11"><span class="pnum">11.</span> Slash commands</h2>
+  <div class="sectionhead">
+    <p>Interface-agnostic command facade (<code>slash_commands.py</code>) shared by CLI and Telegram: <code>/new</code>, <code>/think</code>, <code>/model</code>, <code>/status</code>, <code>/agents</code>, <code>/quit</code>, plus <code>/skill:&lt;name&gt;</code> expansion. Interactive confirms (<code>/new</code>) only prompt on the CLI; Telegram is non-interactive.</p>
+    <p class="meta">Files: <code>slash_commands.py</code>. Provider: LM Studio (CLI), GLM-5.1 (TG).</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">11.1</span><span class="tc-title">/new clears the session</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">After some history, send <code>/new</code> (CLI: confirm the prompt). Then ask a recall question from before.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>CLI shows a confirm; on yes, session is deleted and re-initialized (&ldquo;Session cleared&rdquo;); prior facts are no longer recalled. <code>/model</code> Messages resets toward 0.</li>
+      <li>Declining the CLI confirm leaves history intact.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">11.2</span><span class="tc-title">/status &amp; /model report state</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">Send <code>/status</code> then <code>/model</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>/status</code> shows Model / Messages / Context% / Tools count / Thinking mode. <code>/model</code> shows model name, message count, session dir. Tools count &gt; 0 and matches the registered set.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">11.3</span><span class="tc-title">/think mode toggles (+ invalid)</span><span class="badge both">CLI+TG</span><span class="badge p2">P2</span><span class="badge fail">failure</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><code>/think on</code>, then <code>/think bogus</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li><code>on/off/stream</code> accepted and reflected in <code>/status</code>. <code>bogus</code> → rejected with the valid options, no state change.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">11.4</span><span class="tc-title">/agents shows subagent history</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">After test 4.1, send <code>/agents</code>.</div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Shows active count vs cap and recent runs with status icons (✓/✗/⏱/⊘), durations and a result preview. &ldquo;No subagents spawned yet&rdquo; before any run.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <!-- ===================== SECTION 12 ===================== -->
+  <h2 id="s12"><span class="pnum">12.</span> Dogfooding E2E — your daily workflows</h2>
+  <div class="sectionhead">
+    <p>The acceptance tests that match how you&rsquo;ll actually use this: real <strong>code work in a repo</strong> and real <strong>deep research</strong>. These chain multiple subsystems and are the truest &ldquo;is it good enough to live on?&rdquo; signal.</p>
+    <p class="meta">Provider: LM Studio or Groq for code; Groq for research.</p>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">12.1</span><span class="tc-title">Real multi-step coding task</span><span class="badge both">CLI+TG</span><span class="badge p0">P0</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action">In a scratch git repo: <span class="q">&ldquo;Add a function <code>slugify(s)</code> to <code>utils.py</code> with a docstring, write a quick test, run it, and show me the result.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Chains <code>Read</code>/<code>Write</code>/<code>Edit</code> + <code>Bash</code> across turns (loop continuation), creates the function and a test, runs it, and reports real pass/fail output. No fabricated test results.</li>
+      <li>If the test fails, it iterates rather than declaring success — validates the loop on genuine work.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — the headline dogfooding case.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">12.2</span><span class="tc-title">Codebase Q&amp;A via tools</span><span class="badge both">CLI+TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;How does cron deliver a message back to the agent? Read the relevant files and explain.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Reads <code>cron/cron.py</code> + <code>main.py</code> via tools and explains the queue→<code>process_cron_messages</code>→<code>run_to_completion</code> path — grounded in the actual code, not generic guesses.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only.</div>
+  </div>
+
+  <div class="tc">
+    <div class="tc-head"><span class="tc-id">12.3</span><span class="tc-title">Research → save → schedule digest</span><span class="badge tg">TG</span><span class="badge p1">P1</span><span class="chk">☐ pass&nbsp;&nbsp;☐ fail</span></div>
+    <div class="lbl">Action</div><div class="action"><span class="q">&ldquo;Deep research &lt;a topic you care about&gt;, save the report to a file, and every morning at 9am message me a 3-bullet summary.&rdquo;</span></div>
+    <div class="lbl">Expected (behavioral)</div><div class="expect"><ul>
+      <li>Runs the research pipeline (cited synthesis), writes the report via <code>WriteTool</code>, and schedules a recurring cron (<code>0 9 * * *</code>) that later delivers a digest. Exercises research + storage + cron + delivery in one flow.</li>
+    </ul></div>
+    <div class="cov gap"><span class="k">Gap:</span> manual-only — the &ldquo;assistant I live on&rdquo; integration test.</div>
+  </div>
+
+  <!-- ===================== SUMMARY ===================== -->
+  <h2 id="summary">Coverage summary &amp; automation backlog</h2>
+  <p>Where the existing <code>testing_files/</code> suite already gives you a fast signal, and where manual checks should be hardened into new automated tests before/after go-live:</p>
+  <table>
+    <tr><th>Functionality</th><th>Automated today</th><th>Top automation gap to close</th></tr>
+    <tr><td>Agent loop</td><td>Completion gate (phase 1), repeated-call abort (phase 7)</td><td>Bare loop + single tool round-trip + guardrail trip</td></tr>
+    <tr><td>Tools (R/W/E/Bash)</td><td>— (used indirectly)</td><td><strong>High value:</strong> pure unit tests for Edit/Read/Write/Bash error paths</td></tr>
+    <tr><td>Skills</td><td>—</td><td><strong>High value:</strong> SkillManager create/list/delete + frontmatter parse</td></tr>
+    <tr><td>Subagents</td><td>Entry-tool surfacing (phase 8), depth budget (phases)</td><td>Registry concurrency cap + timeout-fast-fail</td></tr>
+    <tr><td>Persistent storage</td><td>—</td><td><strong>High value:</strong> SessionManager save/load round-trip</td></tr>
+    <tr><td>Session compaction</td><td>Retry path (phase 7)</td><td><code>should_summarize</code> boundary + summary insertion (fake LLM)</td></tr>
+    <tr><td>Cron</td><td>—</td><td><code>_calculate_next_run</code> for in:/interval:/cron forms</td></tr>
+    <tr><td>Deep research</td><td><strong>Strong</strong> — phases 1,4,5,6,7</td><td>Topic-level E2E remains manual (expected)</td></tr>
+    <tr><td>Web search</td><td><strong>Strong</strong> — phase 3 (providers + SSRF)</td><td>Live ddgs/tavily smoke remains manual</td></tr>
+    <tr><td>LLM resilience</td><td>Retry/429 (phase 7)</td><td>Fallback-engages assertion</td></tr>
+    <tr><td>Slash commands</td><td>—</td><td>Facade parse/dispatch per command</td></tr>
+    <tr><td>Observability <span class="meta">(distributed as OBS cards)</span></td><td>No-op safety (whole suite)</td><td>Span-shape assertion (in-memory OTel exporter)</td></tr>
+  </table>
+
+  <div class="callout good">
+    <strong>Suggested execution order</strong>
+    <ol>
+      <li><code>run_all.py</code> green (automated baseline).</li>
+      <li>CLI happy-path sweep: §1 → §2 → §3 → §4 → §5 → §11.</li>
+      <li>Service up (<code>main.py</code>): §7 cron + the Telegram half of §1–§5, §11.</li>
+      <li>Research + web: §8 (technical + non-technical) → §9.</li>
+      <li>Resilience + compaction failure paths: §10, §6.</li>
+      <li><strong>Observability pass</strong> (token set): walk the <span class="badge obs">OBS</span> cards in order — 1.O1/1.O2 → 2.O1 → 4.O1 → 5.O1 → 8.O1 → 9.O1. Capture the <strong>8.O1</strong> pipeline-fan-out trace for your portfolio.</li>
+      <li>Dogfooding: §12 — the real go/no-go.</li>
+    </ol>
+  </div>
+
+  <hr>
+  <p class="meta">Generated for <em>build-your-own-ai-agent</em> · behavioral assertions · CLI + Telegram · happy-path + key failures · article-writer and deployment security intentionally out of scope.</p>
+
+</div>
+</body>
+</html>
