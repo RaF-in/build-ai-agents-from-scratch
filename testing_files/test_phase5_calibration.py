@@ -118,7 +118,7 @@ async def fake_eval_acompletion(model, messages, tools=None, **kw):
         return NS(choices=[NS(message=NS(content="ok", tool_calls=None))])
     tool_contents = [str(m.get("content", "")) for m in messages if m.get("role") == "tool"]
     if not tool_contents:
-        ws = re.search(r"workspace is (/[^\s]+)", sysp).group(1).rstrip(".")
+        ws = re.search(r"Your run workspace is ([^\s.]+)", sysp).group(1)
         tc = NS(id="r1", function=NS(name="ReadTool",
                 arguments=json.dumps({"path": f"{ws}/report.md"})))
         return NS(choices=[NS(message=NS(content="", tool_calls=[tc]))])

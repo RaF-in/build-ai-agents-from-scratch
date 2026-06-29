@@ -100,7 +100,7 @@ async def fake_acompletion(model, messages, tools=None, **kw):
     if "[[PLANNER]]" in sys_prompt:
         msg = NS(content="1. gather facts\n2. write report.md", tool_calls=None)
     elif "[[GENERATOR]]" in sys_prompt:
-        ws = re.search(r"workspace is (/[^\s]+)", sys_prompt).group(1).rstrip(".")
+        ws = re.search(r"Your run workspace is ([^\s.]+)", sys_prompt).group(1)
         if _gen_step["n"] == 0:
             _gen_step["n"] = 1
             tc = NS(id="c1", function=NS(

@@ -102,7 +102,7 @@ async def fake_acompletion(model, messages, tools=None, **kw):
         # 2 sections => verify="auto" treats it as trivial => evaluator skipped
         return NS(choices=[NS(message=NS(content="1. Hook\n2. Payoff", tool_calls=None))])
     if "GENERATOR for an article" in sysp:
-        ws = re.search(r"workspace is (/[^\s]+)", sysp).group(1).rstrip(".")
+        ws = re.search(r"Your run workspace is ([^\s.]+)", sysp).group(1)
         if _gen_step["n"] == 0:
             _gen_step["n"] = 1
             article = ("# The Quiet Cost of X\nAdoption looks free at first "

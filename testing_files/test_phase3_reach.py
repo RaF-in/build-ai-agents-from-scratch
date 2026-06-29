@@ -95,7 +95,7 @@ def test_ssrf_guard():
             pass
     # a public IP literal is allowed (no network needed for a numeric host)
     assert_safe_url("http://93.184.216.34/")
-    print("3.2 SSRF guard (scheme/loopback/link-local/DNS→private; public allowed): OK")
+    print("3.2 SSRF guard (scheme/loopback/link-local/DNS->private; public allowed): OK")
 
 
 def test_extraction_and_wrap():

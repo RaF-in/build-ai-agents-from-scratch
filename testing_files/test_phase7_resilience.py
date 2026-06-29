@@ -168,7 +168,7 @@ async def run_log_acompletion(model, messages, tools=None, **kw):
         return NS(choices=[NS(message=NS(content="1. what is X\n2. why X matters", tool_calls=None))])
     if "[[GENERATOR]]" in sysp:
         import re
-        ws = re.search(r"workspace is (/[^\s]+)", sysp).group(1).rstrip(".")
+        ws = re.search(r"Your run workspace is ([^\s.]+)", sysp).group(1)
         if _gen_step["n"] == 0:
             _gen_step["n"] = 1
             report = "# Report\nX shipped in 2024 [vendor.example/x].\n\n## Sources\n- vendor.example/x\n"

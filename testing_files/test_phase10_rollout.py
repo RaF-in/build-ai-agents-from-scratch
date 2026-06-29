@@ -117,7 +117,7 @@ async def integ_acompletion(model, messages, tools=None, **kw):
             return NS(choices=[NS(message=NS(content="", tool_calls=[tc]))])
         if _gen["n"] == 1:
             _gen["n"] = 2
-            ws = re.search(r"workspace is (/[^\s]+)", sysp).group(1).rstrip(".")
+            ws = re.search(r"Your run workspace is ([^\s.]+)", sysp).group(1)
             report = ("# Report: Is X real?\nX is real and widely adopted "
                       "[https://ex.com/a].\n\n## Sources\n- https://ex.com/a\n")
             tc = NS(id="w", function=NS(name="WriteTool",
@@ -127,7 +127,7 @@ async def integ_acompletion(model, messages, tools=None, **kw):
 
     if "SKEPTICAL QA reviewer" in sysp:
         if not tool_contents:
-            ws = re.search(r"workspace is (/[^\s]+)", sysp).group(1).rstrip(".")
+            ws = re.search(r"Your run workspace is ([^\s.]+)", sysp).group(1)
             tc = NS(id="r", function=NS(name="ReadTool",
                     arguments=json.dumps({"path": f"{ws}/report.md"})))
             return NS(choices=[NS(message=NS(content="", tool_calls=[tc]))])

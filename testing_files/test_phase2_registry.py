@@ -129,7 +129,7 @@ async def fake_acompletion(model, messages, tools=None, **kw):
     if "You are the PLANNER" in sys_prompt:
         msg = NS(content="1. what is X\n2. why X matters", tool_calls=None)
     elif "You are the GENERATOR" in sys_prompt:
-        ws = re.search(r"workspace is (/[^\s]+)", sys_prompt).group(1).rstrip(".")
+        ws = re.search(r"Your run workspace is ([^\s.]+)", sys_prompt).group(1)
         if _gen_step["n"] == 0:
             _gen_step["n"] = 1
             tc = NS(id="c1", function=NS(name="WriteTool", arguments=json.dumps(
@@ -152,7 +152,7 @@ async def test_end_to_end():
     assert res.result["report_path"].endswith("report.md")
     assert os.path.isfile(res.result["report_path"])
     assert main_ctx.run_budget is None  # caller still pristine after a real run
-    print("end-to-end: select→execute→plan→gen→report (eval off): OK")
+    print("end-to-end: select->execute->plan->gen->report (eval off): OK")
 
 
 async def main():

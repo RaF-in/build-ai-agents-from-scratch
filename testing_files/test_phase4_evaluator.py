@@ -136,7 +136,7 @@ async def fake_acompletion(model, messages, tools=None, **kw):
         return NS(choices=[NS(message=NS(content="1. q one\n2. q two\n3. q three", tool_calls=None))])
 
     if "[[GENERATOR]]" in sysp:
-        ws = re.search(r"workspace is (/[^\s]+)", sysp).group(1).rstrip(".")
+        ws = re.search(r"Your run workspace is ([^\s.]+)", sysp).group(1)
         if not has_tool_result:
             content = "# Report v2\nrevised & fixed" if "Revise" in user else "# Report v1\ninitial draft"
             tc = NS(id="g1", function=NS(name="WriteTool",
