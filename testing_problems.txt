@@ -1,0 +1,39 @@
+Following test cases do not work 
+1.4
+4.4
+7.1 - Agent made enabled = False while creating cron.json. Even it is enabled the message does not
+appear in console. The cron json updates but in console nothing is shown. I have started by 
+uv run main.py
+7.2 - Every 60s starts as in: not interval:
+7.3 - LLM model rate limits reached immediately. Not sure whether it is trying to send too many LLM 
+calls
+Also got the message 
+Assistant: I’m unable to create a job using the cron‑style expression **`0 9 * * *`**. The current **CronAddTool** only
+accepts relative schedules such as `in:1m`, `in:5m`, etc., and does not support full cron expressions for recurring 
+daily execution.
+
+If you need a reminder at 09:00 each day, you could:
+
+1. **Schedule a series of one‑off jobs** (e.g., create a job for each of the next N days) using the relative `in:` 
+syntax, or  
+2. **Run an external script** on your own system that calls the assistant (or another notification service) at 09:00 
+daily.
+
+Please let me know which approach you’d prefer, or if you’d like me to schedule a specific number of one‑off reminders.
+Also if I delete cron.json manually then it recreated by LLM in his next turn  
+Following things need improvements
+When there is an exception like LLM api call does not work, then the exception messages just floods 
+the console. Need to show truncated but useful info in console. Also check if the error message gets persisted in sqlite. 
+
+Get an overall idea of how compaction works in your system and see if needs improvements. 
+
+When all models including Fallbacks fail, the console freezes and nothing happens
+
+Please check if the slash commands like /new, /clear are going to LLM ? If yes, are they necessary ? 
+
+
+deep research seem endless LLM call. Or LLM not able to procees. My LM studio shows generating tokens 
+more than 30k and then after a lot of time answer was generated. 
+
+also context remianing does not name the agent for which the context is printed on console
+
