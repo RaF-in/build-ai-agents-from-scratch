@@ -19,7 +19,7 @@ from typing import Literal
 
 MAX_CONCURRENT_SUBAGENTS = 3
 SUBAGENT_TIMEOUT_SECONDS = 300  # 5 minutes
-SUBAGENT_MODEL = "huggingface/zai-org/GLM-5.1"
+SUBAGENT_MODEL = "lm_studio/google/gemma-4-12b-qat"
 MAX_HISTORY = 50
 
 # Retry-with-backoff

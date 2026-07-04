@@ -1,6 +1,5 @@
 Following test cases do not work 
 1.4
-4.4
 7.1 - Agent made enabled = False while creating cron.json. Even it is enabled the message does not
 appear in console. The cron json updates but in console nothing is shown. I have started by 
 uv run main.py
@@ -29,11 +28,14 @@ Get an overall idea of how compaction works in your system and see if needs impr
 
 When all models including Fallbacks fail, the console freezes and nothing happens
 
+also context remianing does not name the agent for which the context is printed on console
+
 Please check if the slash commands like /new, /clear are going to LLM ? If yes, are they necessary ? 
 
+When some failures happen like llm fallbacks fail, the console is flooded with error message
 
 deep research seem endless LLM call. Or LLM not able to procees. My LM studio shows generating tokens 
 more than 30k and then after a lot of time answer was generated. 
 
-also context remianing does not name the agent for which the context is printed on console
+
 

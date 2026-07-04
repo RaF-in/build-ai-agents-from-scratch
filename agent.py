@@ -105,6 +105,11 @@ class AgentRuntime:
         self._last_tool_sig: str | None = None
         self._repeat_count = 0
         self._force_summary = False
+        # Phase 0.3 fix: executed tool rounds since the last user message. This is the
+        # actual per-turn budget counter (one increment per tool round, so parallel
+        # calls count once and the number matches max_tool_calls_per_turn). Reset on a
+        # new user turn; incremented in _run_turn_body when a round actually runs.
+        self._tool_rounds_since_user = 0
         self.thinking_mode: Literal["off", "on", "stream"] = "off"
         self.agent_tool_module = agent_tools
         self.agent_tool_path = Path(agent_tools.__file__).resolve()
@@ -190,6 +195,7 @@ class AgentRuntime:
                 self._last_tool_sig = None    # and the repeated-call detector (7.2)
                 self._repeat_count = 0
                 self._force_summary = False
+                self._tool_rounds_since_user = 0  # fresh user turn — reset the budget
                 await self.session_manager.add_message(
                     SessionEvent(role="user", parts=[TextPart(text=user_text)])
                 )
@@ -204,17 +210,10 @@ class AgentRuntime:
                     parts=[TextPart(text=sys_text)],
                 )] + conversation
 
-            last_user_idx = -1
-            for idx in range(len(conversation) - 1, -1, -1):
-                event = conversation[idx]
-                if isinstance(event, SessionEvent) and event.role == "user":
-                    last_user_idx = idx
-                    break
-            events_since_user = (
-                len(conversation) if last_user_idx < 0
-                else len(conversation) - last_user_idx - 1
-            )
-            has_tool_budget = events_since_user < self.max_tool_calls_per_turn
+            # Per-turn budget: number of tool ROUNDS executed since the last user
+            # message (Phase 0.3 fix). Counting executed rounds — not stored events —
+            # makes the cap match max_tool_calls_per_turn and counts parallel calls once.
+            has_tool_budget = self._tool_rounds_since_user < self.max_tool_calls_per_turn
 
             messages = SessionManager.events_to_litellm_messages(conversation)
             # Phase 7.2: a forced summary turn (repeat limit hit) suppresses tools exactly
@@ -231,6 +230,15 @@ class AgentRuntime:
             response = await acompletion(model=self.model_name, messages=messages, tools=tools)
             msg = response.choices[0].message
             tool_calls = msg.tool_calls
+            # Guardrail enforcement (Bug 2 fix): if tools were suppressed this turn
+            # (budget hit or forced summary => tools is None) but the model emitted tool
+            # calls anyway — as local LM Studio models can — do NOT execute them. Drop
+            # them so the turn ends in prose and the loop cannot run unbounded. Without
+            # this the per-turn budget is only advisory, not enforced.
+            if tools is None and tool_calls:
+                print(f"[yellow][Guardrail] Model returned {len(tool_calls)} tool call(s) "
+                      f"after tools were suppressed; ignoring them and ending the turn.[/yellow]")
+                tool_calls = None
             # Token metric from the usage litellm already returned (Phase 2.2 / point 4:
             # no re-instrumented HTTP call). litellm's callback owns the LLM span itself.
             telemetry.record_tokens(getattr(response, "usage", None))
@@ -301,6 +309,7 @@ class AgentRuntime:
 
         await self.session_manager.add_message(SessionEvent(role="tool", parts=response_parts))
         self._idle_continuations = 0  # real progress this turn — clear the idle gate
+        self._tool_rounds_since_user += 1  # one executed tool round — counts toward budget
         return True
 
     async def run_tool(self, tool_name: str, args: dict[str, Any]) -> ToolResult:
@@ -396,10 +405,10 @@ async def run_to_completion(runtime, user_text, sys_prompt, *, channel) -> bool:
 
 def _create_cli_runtime(cron_service=None):
     context = AgentContext(cron_service=cron_service)
-    model_name = "huggingface/zai-org/GLM-5.1"
+    model_name = "lm_studio/google/gemma-4-12b-qat"
     session_dir = Path.home() / ".ai_assistant" / "sessions" / "cli"
     session_dir.mkdir(parents=True, exist_ok=True)
-    sm = SessionManager(basedir=session_dir, model_name=model_name)
+    sm = SessionManager(basedir=session_dir, model_name=model_name, label="cli")
     runtime = AgentRuntime(context=context, session_manager=sm, model_name=model_name)
     runtime.on("on_model_response", print_llm_response)
     runtime.on("on_tool_result", print_tool_result)
@@ -433,7 +442,16 @@ async def _cli_loop(runtime):
 
         # Normal LLM flow
         sys_prompt = prepare_system_message(MemoryManager(), skill_manager.format_for_prompt())
-        await run_to_completion(runtime, user_text, sys_prompt, channel="cli")
+        # Error boundary: an exhausted-fallback (or any) LLM failure must not tear
+        # down the interactive loop. Without this the exception escapes to the
+        # gather() in main.py and the process hangs with no prompt. Catch, report,
+        # and re-prompt. Session history stays consistent because run() persists
+        # each tool-call turn together with its responses before the next model call.
+        try:
+            await run_to_completion(runtime, user_text, sys_prompt, channel="cli")
+        except Exception as e:
+            print(f"[red]Model unavailable — all retries and fallbacks failed:[/red] {e}")
+            print("[yellow]Your message was saved; try again in a moment.[/yellow]")
 
 async def start_cli(cron_service):
     global cli_runtime

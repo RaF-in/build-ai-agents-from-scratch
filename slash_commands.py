@@ -1,8 +1,35 @@
 from typing import Protocol, Literal, Any, TYPE_CHECKING
 import asyncio
+import re
 
 if TYPE_CHECKING:
     from agent import AgentRuntime
+
+
+# A command-shaped first token: a single "/word" with no embedded slashes or spaces
+# (so "/clear" matches but a real path like "/etc/hosts" or a sentence starting with
+# "/" does NOT). Used to reject mistyped commands without swallowing genuine messages
+# that happen to start with a slash.
+_COMMAND_TOKEN = re.compile(r"^/[a-zA-Z][\w-]*$")
+
+# Single source of truth for the built-in commands, shown by /help and in the
+# unknown-command hint. /skill:<name> is dynamic and listed separately.
+_COMMANDS = [
+    ("/new (or /clear)", "clear the session and start fresh"),
+    ("/think <off|on|stream>", "set extended-thinking mode"),
+    ("/model", "show the current model and session info"),
+    ("/status", "show full session status"),
+    ("/agents", "show subagent run history"),
+    ("/skill:<name> [args]", "run a skill as an LLM turn"),
+    ("/help", "show this command list"),
+    ("/quit", "end the session"),
+]
+
+
+def _help_text() -> str:
+    lines = ["Available commands:"]
+    lines += [f"  {name}  —  {desc}" for name, desc in _COMMANDS]
+    return "\n".join(lines)
 
 
 # =====================================================================
@@ -182,6 +209,13 @@ class SlashCommandHandler:
         await self.output.send_rich("\n".join(lines), format_type="status")
         return True
 
+    # ---- /help -------------------------------------------------------
+
+    async def handle_help(self) -> bool:
+        """List the available slash commands."""
+        await self.output.send(_help_text())
+        return True
+
     # ---- /quit -------------------------------------------------------
 
     async def handle_quit(self) -> str:
@@ -277,8 +311,11 @@ async def parse_and_execute(
     if command.startswith("/skill:"):
         return await _expand_skill_command(text.strip(), output)
 
-    if command == "/new":
+    if command in ("/new", "/clear"):
         return await handler.handle_new()
+
+    elif command == "/help":
+        return await handler.handle_help()
 
     elif command == "/think":
         mode = parts[1].lower() if len(parts) > 1 else "on"
@@ -296,5 +333,13 @@ async def parse_and_execute(
     elif command == "/quit":
         return await handler.handle_quit()
 
-    # Unknown slash command — let it fall through to the LLM
+    # A command-shaped but unrecognized token (e.g. "/reset", "/compact", a typo) is a
+    # mistyped command, NOT a message — reject it with a hint and skip the LLM so we
+    # don't waste a model round-trip interpreting it. Anything that only *starts* with
+    # "/" but isn't command-shaped (a path like "/etc/hosts", a sentence) falls through
+    # to the LLM as a normal message, unchanged.
+    if _COMMAND_TOKEN.match(command):
+        await output.send(f"❌ Unknown command: {command}\n{_help_text()}")
+        return True
+
     return False

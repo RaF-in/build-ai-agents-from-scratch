@@ -17,7 +17,7 @@ from slash_commands import TelegramOutputHandler, parse_and_execute
 from skills import skill_manager
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_NAME = "huggingface/zai-org/GLM-5.1"
+MODEL_NAME = "lm_studio/google/gemma-4-12b-qat"
 
 bot = Bot(token=os.environ.get("TELEGRAM_BOT_TOKEN"))
 cron_service = None
@@ -56,7 +56,7 @@ async def get_runtime(chat_id: int):
         if chat_id not in _runtimes:
             session_dir = BASE_DIR / "sessions" / str(chat_id)
             session_dir.mkdir(parents=True, exist_ok=True)
-            sm = SessionManager(basedir=session_dir, model_name=MODEL_NAME)
+            sm = SessionManager(basedir=session_dir, model_name=MODEL_NAME, label=f"telegram:{chat_id}")
             runtime = AgentRuntime(
                 context=AgentContext(cron_service=cron_service),
                 session_manager=sm,
@@ -88,7 +88,9 @@ async def webhook(update: TelegramUpdate):
     # Parse slash commands
     text = update.message.text
     result = await parse_and_execute(text, runtime, output)
-    if result is True:  # Command handled, skip LLM
+    # True => command handled; "QUIT" => /quit (no interactive loop to break on a
+    # webhook, but it must NOT fall through to the LLM as the literal text "/quit").
+    if result is True or result == "QUIT":  # command handled, skip LLM
         return {"ok": True}
 
     # A /skill: invocation expands into a full LLM turn.
@@ -96,7 +98,14 @@ async def webhook(update: TelegramUpdate):
 
     # Normal LLM flow (Phase 2.1: wrapped in an agent.request span; nests under the
     # FastAPI HTTP span from instrument_fastapi).
-    await run_to_completion(runtime, user_text, sys_prompt, channel="telegram")
+    # Error boundary: on an exhausted-fallback (or any) LLM failure, notify the user
+    # and still return ok=True. Letting the exception escape yields an HTTP 500,
+    # which makes Telegram retry the same webhook and retry-storm the failure.
+    try:
+        await run_to_completion(runtime, user_text, sys_prompt, channel="telegram")
+    except Exception as e:
+        print(f"[Telegram Error] {e!r}")
+        await output.send("⚠️ The model is temporarily unavailable. Please try again in a moment.")
     return {"ok": True}
 
 if __name__ == "__main__":

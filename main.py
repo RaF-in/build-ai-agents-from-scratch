@@ -64,7 +64,13 @@ async def main():
     )
     cli_task = asyncio.create_task(agent.start_cli(cron_service))
 
-    await asyncio.gather(telegram_task, cli_task)
+    # Defense-in-depth: return_exceptions=True so one task crashing can't propagate
+    # into gather() and hang the process during shutdown while the sibling task is
+    # still live. Surface any crash instead of freezing silently.
+    results = await asyncio.gather(telegram_task, cli_task, return_exceptions=True)
+    for r in results:
+        if isinstance(r, Exception):
+            print(f"[Fatal] background task crashed: {r!r}")
 
 
 if __name__ == "__main__":

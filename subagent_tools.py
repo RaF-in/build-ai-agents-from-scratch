@@ -131,6 +131,7 @@ async def run_subagent(
                             max_tool_calls_per_turn=max_tool_calls_per_turn,
                             policy=policy,
                             todo_list=todo_list,
+                            result_name=result_name,
                         ),
                         timeout=timeout_s,
                     )
@@ -179,6 +180,7 @@ async def _run_child(
     max_tool_calls_per_turn: int,
     policy: object | None = None,
     todo_list: object | None = None,
+    result_name: str = "subagent",
 ) -> str:
     # Deferred import breaks the import cycle.
     from agent import AgentRuntime
@@ -196,7 +198,8 @@ async def _run_child(
     if todo_list is not None:
         child_ctx.todo_list = todo_list
 
-    sm = SessionManager.in_memory(model_name)
+    label = f"sub:d{child_ctx.depth}:{result_name}"
+    sm = SessionManager.in_memory(model_name, label=label)
     child = AgentRuntime(
         context=child_ctx,                # depth+1; cron/telegram services shared
         session_manager=sm,

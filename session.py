@@ -104,7 +104,8 @@ StoredEventAdapter = TypeAdapter(
 )
 
 class SessionManager:
-    def __init__(self, basedir: str | Path | None, model_name: str):
+    def __init__(self, basedir: str | Path | None, model_name: str, label: str = "main"):
+        self.label = label
         self.model_name = model_name
         self.basedir = Path(basedir).resolve() if basedir is not None else Path(__file__).resolve().parent
         self.db_path = self.basedir / "agent.db"
@@ -114,13 +115,13 @@ class SessionManager:
         self.is_initialized = False
 
     @classmethod
-    def in_memory(cls, model_name: str) -> "SessionManager":
+    def in_memory(cls, model_name: str, label: str = "subagent") -> "SessionManager":
         """An ephemeral, disk-less session for subagent workers.
 
         Backed by an in-memory SQLite DB tied to its single connection — when
         close() runs, all state vanishes. No session file, no memory dir.
         """
-        sm = cls(basedir=None, model_name=model_name)
+        sm = cls(basedir=None, model_name=model_name, label=label)
         sm.db_path = ":memory:"
         sm.memory_dir = None
         return sm
@@ -229,9 +230,8 @@ class SessionManager:
         )
 
         print(
-            f"[Memory]: "
-            f"{remaining_pct}% "
-            f"context remaining"
+            f"[Memory:{self.label}] "
+            f"{remaining_pct}% context remaining"
         )
 
         return (
